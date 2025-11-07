@@ -3,8 +3,13 @@ use colored::*;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+
+mod alerts;
+mod monitor;
+
+use alerts::{AlertManager, AlertStatus, display_alerts, display_alert_detail};
 
 #[derive(Debug, Clone)]
 struct FstabEntry {
@@ -69,6 +74,58 @@ fn main() {
                 None
             };
             suggest_mounts(device_filter)
+        }
+        // Alerting commands
+        "monitor" => {
+            let interval = if args.len() >= 3 {
+                args[2].parse::<u64>().unwrap_or(300)
+            } else {
+                300
+            };
+            start_monitoring(interval)
+        }
+        "check" => run_health_check(),
+        "alerts" => {
+            let status_filter = if args.len() >= 3 {
+                match args[2].as_str() {
+                    "firing" => Some(AlertStatus::Firing),
+                    "acknowledged" => Some(AlertStatus::Acknowledged),
+                    "resolved" => Some(AlertStatus::Resolved),
+                    "silenced" => Some(AlertStatus::Silenced),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            list_alerts(status_filter)
+        }
+        "alert" => {
+            if args.len() < 3 {
+                eprintln!("{}", "Usage: catdog alert <alert_id>".red());
+                process::exit(1);
+            }
+            show_alert(&args[2])
+        }
+        "ack" | "acknowledge" => {
+            if args.len() < 3 {
+                eprintln!("{}", "Usage: catdog ack <alert_id>".red());
+                process::exit(1);
+            }
+            acknowledge_alert(&args[2])
+        }
+        "resolve" => {
+            if args.len() < 3 {
+                eprintln!("{}", "Usage: catdog resolve <alert_id>".red());
+                process::exit(1);
+            }
+            resolve_alert(&args[2])
+        }
+        "silence" => {
+            if args.len() < 3 {
+                eprintln!("{}", "Usage: catdog silence <alert_id>".red());
+                process::exit(1);
+            }
+            silence_alert(&args[2])
         }
         "help" | "--help" | "-h" => {
             print_help();
@@ -769,53 +826,118 @@ fn suggest_mounts(device_filter: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn get_storage_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".catdog").join("alerts.json")
+}
+
+fn start_monitoring(interval: u64) -> Result<()> {
+    let storage_path = get_storage_path();
+    monitor::start_monitoring(&storage_path, interval)
+}
+
+fn run_health_check() -> Result<()> {
+    let storage_path = get_storage_path();
+    monitor::check_once(&storage_path)
+}
+
+fn list_alerts(status_filter: Option<AlertStatus>) -> Result<()> {
+    let storage_path = get_storage_path();
+    let manager = AlertManager::new(storage_path)?;
+
+    let alerts = manager.get_alerts(status_filter);
+    display_alerts(&alerts);
+
+    Ok(())
+}
+
+fn show_alert(alert_id: &str) -> Result<()> {
+    let storage_path = get_storage_path();
+    let manager = AlertManager::new(storage_path)?;
+
+    match manager.get_alert(alert_id) {
+        Some(alert) => {
+            display_alert_detail(alert);
+            Ok(())
+        }
+        None => {
+            eprintln!("{} Alert not found: {}", "Error:".red(), alert_id);
+            process::exit(1);
+        }
+    }
+}
+
+fn acknowledge_alert(alert_id: &str) -> Result<()> {
+    let storage_path = get_storage_path();
+    let mut manager = AlertManager::new(storage_path)?;
+
+    manager.acknowledge_alert(alert_id)?;
+    println!("{} Alert {} acknowledged", "✓".green().bold(), alert_id);
+
+    Ok(())
+}
+
+fn resolve_alert(alert_id: &str) -> Result<()> {
+    let storage_path = get_storage_path();
+    let mut manager = AlertManager::new(storage_path)?;
+
+    manager.resolve_alert(alert_id)?;
+    println!("{} Alert {} resolved", "✓".green().bold(), alert_id);
+
+    Ok(())
+}
+
+fn silence_alert(alert_id: &str) -> Result<()> {
+    let storage_path = get_storage_path();
+    let mut manager = AlertManager::new(storage_path)?;
+
+    manager.silence_alert(alert_id)?;
+    println!("{} Alert {} silenced", "✓".green().bold(), alert_id);
+
+    Ok(())
+}
+
 fn print_help() {
-    println!(r#"
-{} {} An fstab utility (cat shows it, dog fetches it nicely!)
+    println!("{} {} An fstab utility with PagerDuty-like alerting!",
+        "catdog".bright_green().bold(),
+        "-".bright_black());
+    println!("\n{}", "USAGE:".cyan().bold());
+    println!("    catdog <COMMAND>\n");
 
-{}
-    catdog <COMMAND>
+    println!("{} {}", "FILESYSTEM".cyan().bold(), "COMMANDS:".cyan().bold());
+    println!("    {}          Display raw /etc/fstab file (like cat)", "cat".bright_yellow());
+    println!("    {}          Fetch and parse /etc/fstab in a nice table (like a dog fetching!)", "dog".bright_yellow());
+    println!("    {}     List all mount points", "list, ls".bright_yellow());
+    println!("    {}  Find entries matching device or mount point", "find <term>".bright_yellow());
+    println!("    {}     Check /etc/fstab for common issues", "validate".bright_yellow());
+    println!("    {}    Discover available block devices", "discover".bright_yellow());
+    println!("    {}       Generate smart mount suggestions for devices", "suggest [device]".bright_yellow());
 
-{}
-    {}          Display raw /etc/fstab file (like cat)
-    {}          Fetch and parse /etc/fstab in a nice table (like a dog fetching!)
-    {}     List all mount points
-    {}  Find entries matching device or mount point
-    {}     Check /etc/fstab for common issues
-    {}    Discover available block devices
-    {}       Generate smart mount suggestions for devices
-    {}         Show this help message
+    println!("\n{} {}", "ALERTING".cyan().bold(), "COMMANDS:".cyan().bold());
+    println!("    {}       Run filesystem health checks once", "check".bright_yellow());
+    println!("    {}       Start continuous monitoring (default: 300s interval)", "monitor [interval]".bright_yellow());
+    println!("    {}        List all alerts (optionally filter: firing/acknowledged/resolved/silenced)", "alerts [status]".bright_yellow());
+    println!("    {}       Show detailed information about an alert", "alert <id>".bright_yellow());
+    println!("    {}         Acknowledge an alert", "ack <id>".bright_yellow());
+    println!("    {}        Resolve an alert", "resolve <id>".bright_yellow());
+    println!("    {}       Silence an alert", "silence <id>".bright_yellow());
 
-{}
-    catdog cat             {} Show raw fstab file
-    catdog dog             {} Parse and display fstab nicely
-    catdog find /dev       {} Find all entries with /dev
-    catdog validate        {} Check for common issues
-    catdog discover        {} List all block devices with details
-    catdog suggest         {} Generate fstab entries with smart defaults
-    catdog suggest disk1s1 {} Suggest mount for specific device
-"#,
-    "catdog".bright_green().bold(),
-    "-".bright_black(),
-    "USAGE:".cyan().bold(),
-    "COMMANDS:".cyan().bold(),
-    "cat".bright_yellow(),
-    "dog".bright_yellow(),
-    "list, ls".bright_yellow(),
-    "find <term>".bright_yellow(),
-    "validate".bright_yellow(),
-    "discover".bright_yellow(),
-    "suggest [device]".bright_yellow(),
-    "help".bright_yellow(),
-    "EXAMPLES:".cyan().bold(),
-    "#".bright_black(),
-    "#".bright_black(),
-    "#".bright_black(),
-    "#".bright_black(),
-    "#".bright_black(),
-    "#".bright_black(),
-    "#".bright_black(),
-    );
+    println!("\n    {}         Show this help message", "help".bright_yellow());
+
+    println!("\n{}", "EXAMPLES:".cyan().bold());
+    println!("    catdog cat                 {} Show raw fstab file", "#".bright_black());
+    println!("    catdog dog                 {} Parse and display fstab nicely", "#".bright_black());
+    println!("    catdog find /dev           {} Find all entries with /dev", "#".bright_black());
+    println!("    catdog validate            {} Check for common issues", "#".bright_black());
+    println!("    catdog discover            {} List all block devices with details", "#".bright_black());
+    println!("    catdog suggest             {} Generate fstab entries with smart defaults", "#".bright_black());
+    println!("    catdog check               {} Run health checks once", "#".bright_black());
+    println!("    catdog monitor 60          {} Start monitoring with 60s interval", "#".bright_black());
+    println!("    catdog alerts              {} List all alerts", "#".bright_black());
+    println!("    catdog alerts firing       {} List only firing alerts", "#".bright_black());
+    println!("    catdog alert <id>          {} Show alert details", "#".bright_black());
+    println!("    catdog ack <id>            {} Acknowledge an alert", "#".bright_black());
+    println!("    catdog resolve <id>        {} Resolve an alert", "#".bright_black());
 }
 
 #[cfg(test)]
