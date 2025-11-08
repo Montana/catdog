@@ -28,18 +28,11 @@ notifications:
     on_success: never
     on_failure: change
 
-# Only run on Linux to avoid macOS quota issues
-# The discovery commands will gracefully handle missing utilities
 os:
   - linux
 
-# Use Ubuntu 20.04 for better compatibility
 dist: focal
 
-# Speed up builds with sudo: false
-sudo: false
-
-# Only build main branch and tags
 branches:
   only:
     - main

@@ -21,7 +21,6 @@ impl FsMonitor {
     pub fn run_checks(&mut self) -> Result<()> {
         println!("{} Running filesystem checks...", "🔍".bold());
 
-        // Run all monitoring checks
         self.check_disk_usage()?;
         self.check_fstab_validity()?;
         self.check_mount_failures()?;
@@ -134,7 +133,6 @@ impl FsMonitor {
     }
 
     fn check_fstab_validity(&mut self) -> Result<()> {
-        // Check if fstab exists and is readable
         let fstab_path = "/etc/fstab";
 
         if !Path::new(fstab_path).exists() {
@@ -148,7 +146,6 @@ impl FsMonitor {
             return Ok(());
         }
 
-        // Try to read and parse fstab
         let contents = match fs::read_to_string(fstab_path) {
             Ok(c) => c,
             Err(e) => {
@@ -164,7 +161,6 @@ impl FsMonitor {
             }
         };
 
-        // Check for malformed entries
         let mut line_num = 0;
         for line in contents.lines() {
             line_num += 1;
