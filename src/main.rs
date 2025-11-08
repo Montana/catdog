@@ -5,11 +5,24 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
+use log::{info, warn, error, debug};
 
 mod alerts;
 mod monitor;
+mod corpus;
 
 use alerts::{AlertManager, AlertStatus, display_alerts, display_alert_detail};
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
+
+#[derive(Debug, Clone)]
+struct CliConfig {
+    json_output: bool,
+    no_color: bool,
+    verbose: bool,
+    dry_run: bool,
+}
 
 #[derive(Debug, Clone)]
 struct FstabEntry {
@@ -45,14 +58,49 @@ struct MountSuggestion {
 }
 
 fn main() {
+    // Initialize logger
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+
     let args: Vec<String> = env::args().collect();
+
+    // Handle version early
+    if args.len() >= 2 && (args[1] == "--version" || args[1] == "-V" || args[1] == "version") {
+        print_version();
+        return;
+    }
 
     if args.len() < 2 {
         print_help();
         process::exit(1);
     }
 
-    let command = &args[1];
+    // Parse global flags
+    let mut config = CliConfig {
+        json_output: args.contains(&"--json".to_string()),
+        no_color: args.contains(&"--no-color".to_string()) || env::var("NO_COLOR").is_ok(),
+        verbose: args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string()),
+        dry_run: args.contains(&"--dry-run".to_string()),
+    };
+
+    // Disable colors if requested
+    if config.no_color {
+        colored::control::set_override(false);
+    }
+
+    // Filter out flags to get the actual command and args
+    let non_flag_args: Vec<String> = args.iter()
+        .filter(|a| !a.starts_with("--") && !a.starts_with("-v") && !a.starts_with("-V"))
+        .map(|s| s.clone())
+        .collect();
+
+    if non_flag_args.len() < 2 {
+        print_help();
+        process::exit(1);
+    }
+
+    let command = &non_flag_args[1];
+
+    info!("Executing command: {}", command);
 
     let result = match command.as_str() {
         "cat" => cat_fstab(),
@@ -66,7 +114,16 @@ fn main() {
             find_entry(&args[2])
         }
         "validate" => validate_fstab(),
-        "discover" => discover_devices(),
+        "discover" => discover_devices(&config),
+        "backup" => {
+            if non_flag_args.len() < 3 {
+                backup_file("/etc/fstab")
+                    .map(|path| println!("Backup created: {}", path.display()))
+            } else {
+                backup_file(&non_flag_args[2])
+                    .map(|path| println!("Backup created: {}", path.display()))
+            }
+        }
         "suggest" => {
             let device_filter = if args.len() >= 3 {
                 Some(args[2].as_str())
@@ -75,7 +132,15 @@ fn main() {
             };
             suggest_mounts(device_filter)
         }
-        // Alerting commands
+        "generate" | "generate-fstab" => {
+            let output_file = if args.len() >= 3 {
+                Some(args[2].as_str())
+            } else {
+                None
+            };
+            generate_fstab(output_file)
+        }
+        // Bark (alert) commands
         "monitor" => {
             let interval = if args.len() >= 3 {
                 args[2].parse::<u64>().unwrap_or(300)
@@ -85,7 +150,7 @@ fn main() {
             start_monitoring(interval)
         }
         "check" => run_health_check(),
-        "alerts" => {
+        "barks" | "alerts" => {
             let status_filter = if args.len() >= 3 {
                 match args[2].as_str() {
                     "firing" => Some(AlertStatus::Firing),
@@ -99,33 +164,66 @@ fn main() {
             };
             list_alerts(status_filter)
         }
-        "alert" => {
+        "bark" | "alert" => {
             if args.len() < 3 {
-                eprintln!("{}", "Usage: catdog alert <alert_id>".red());
+                eprintln!("{}", "Usage: catdog bark <bark_id>".red());
                 process::exit(1);
             }
             show_alert(&args[2])
         }
-        "ack" | "acknowledge" => {
+        "ack" | "acknowledge" | "pet" => {
             if args.len() < 3 {
-                eprintln!("{}", "Usage: catdog ack <alert_id>".red());
+                eprintln!("{}", "Usage: catdog ack <bark_id>".red());
                 process::exit(1);
             }
             acknowledge_alert(&args[2])
         }
-        "resolve" => {
+        "resolve" | "quiet" => {
             if args.len() < 3 {
-                eprintln!("{}", "Usage: catdog resolve <alert_id>".red());
+                eprintln!("{}", "Usage: catdog resolve <bark_id>".red());
                 process::exit(1);
             }
             resolve_alert(&args[2])
         }
-        "silence" => {
+        "silence" | "hush" => {
             if args.len() < 3 {
-                eprintln!("{}", "Usage: catdog silence <alert_id>".red());
+                eprintln!("{}", "Usage: catdog silence <bark_id>".red());
                 process::exit(1);
             }
             silence_alert(&args[2])
+        }
+        // Corpus commands
+        "corpus" => {
+            if args.len() < 3 {
+                eprintln!("{}", "Usage: catdog corpus <ingest|search|stats>".red());
+                process::exit(1);
+            }
+            match args[2].as_str() {
+                "ingest" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog corpus ingest <file>".red());
+                        process::exit(1);
+                    }
+                    corpus_ingest(&args[3])
+                }
+                "search" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog corpus search <query>".red());
+                        process::exit(1);
+                    }
+                    let query = args[3..].join(" ");
+                    corpus_search(&query)
+                }
+                "stats" => corpus_stats(),
+                _ => {
+                    eprintln!("{}", "Unknown corpus command. Try: ingest, search, stats".red());
+                    process::exit(1);
+                }
+            }
+        }
+        "version" | "--version" | "-V" => {
+            print_version();
+            Ok(())
         }
         "help" | "--help" | "-h" => {
             print_help();
@@ -587,72 +685,100 @@ fn parse_linux_device(device: &serde_json::Value, devices: &mut Vec<BlockDevice>
     }
 }
 
-fn discover_devices() -> Result<()> {
-    println!("{} Discovering block devices...\n", "🔍".bold());
-
+fn discover_devices(config: &CliConfig) -> Result<()> {
     let devices = discover_block_devices()?;
 
     if devices.is_empty() {
-        println!("{}", "No block devices found".yellow());
+        if config.json_output {
+            println!("{}", serde_json::json!({
+                "devices": [],
+                "count": 0
+            }));
+        } else {
+            println!("No block devices found");
+        }
         return Ok(());
     }
 
-    println!("{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
-             "DEVICE".cyan().bold(),
-             "UUID".cyan().bold(),
-             "LABEL".cyan().bold(),
-             "TYPE".cyan().bold(),
-             "SIZE".cyan().bold(),
-             "MOUNT POINT".cyan().bold());
-    println!("{}", "=".repeat(140).bright_black());
+    if config.json_output {
+        // JSON output for automation
+        let json_devices: Vec<serde_json::Value> = devices.iter().map(|d| {
+            serde_json::json!({
+                "device": d.device,
+                "uuid": d.uuid,
+                "partuuid": d.partuuid,
+                "label": d.label,
+                "filesystem": d.fs_type,
+                "size": d.size,
+                "mount_point": d.mount_point,
+                "is_ssd": d.is_ssd,
+                "is_removable": d.is_removable
+            })
+        }).collect();
 
-    for device in &devices {
-        let uuid_display = device.uuid.as_deref().unwrap_or("-");
-        let label_display = device.label.as_deref().unwrap_or("-");
-        let fs_display = device.fs_type.as_deref().unwrap_or("-");
-        let size_display = device.size.as_deref().unwrap_or("-");
-        let mount_display = device.mount_point.as_deref().unwrap_or("-");
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "devices": json_devices,
+            "count": devices.len()
+        }))?);
+    } else {
+        // Human-readable output
+        println!("Discovering block devices...\n");
 
-        let device_color = if device.is_removable {
-            device.device.bright_magenta()
-        } else if device.is_ssd {
-            device.device.bright_cyan()
-        } else {
-            device.device.bright_blue()
-        };
+        println!("{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
+                 "DEVICE".cyan().bold(),
+                 "UUID".cyan().bold(),
+                 "LABEL".cyan().bold(),
+                 "TYPE".cyan().bold(),
+                 "SIZE".cyan().bold(),
+                 "MOUNT POINT".cyan().bold());
+        println!("{}", "=".repeat(140).bright_black());
 
-        let mut tags = Vec::new();
-        if device.is_ssd {
-            tags.push("SSD".green());
-        }
-        if device.is_removable {
-            tags.push("REMOVABLE".magenta());
-        }
+        for device in &devices {
+            let uuid_display = device.uuid.as_deref().unwrap_or("-");
+            let label_display = device.label.as_deref().unwrap_or("-");
+            let fs_display = device.fs_type.as_deref().unwrap_or("-");
+            let size_display = device.size.as_deref().unwrap_or("-");
+            let mount_display = device.mount_point.as_deref().unwrap_or("-");
 
-        print!("{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
-               device_color.to_string(),
-               uuid_display.truecolor(150, 150, 150).to_string(),
-               label_display.bright_white().to_string(),
-               fs_display.yellow().to_string(),
-               size_display,
-               mount_display.green().to_string());
+            let device_color = if device.is_removable {
+                device.device.bright_magenta()
+            } else if device.is_ssd {
+                device.device.bright_cyan()
+            } else {
+                device.device.bright_blue()
+            };
 
-        if !tags.is_empty() {
-            print!(" [");
-            for (i, tag) in tags.iter().enumerate() {
-                if i > 0 {
-                    print!(", ");
-                }
-                print!("{}", tag);
+            let mut tags = Vec::new();
+            if device.is_ssd {
+                tags.push("SSD".green());
             }
-            print!("]");
-        }
-        println!();
-    }
+            if device.is_removable {
+                tags.push("REMOVABLE".magenta());
+            }
 
-    println!("\n{} Found {} block device(s)",
-             "✓".green().bold(),
-             devices.len().to_string().bright_white().bold());
+            print!("{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
+                   device_color.to_string(),
+                   uuid_display.truecolor(150, 150, 150).to_string(),
+                   label_display.bright_white().to_string(),
+                   fs_display.yellow().to_string(),
+                   size_display,
+                   mount_display.green().to_string());
+
+            if !tags.is_empty() {
+                print!(" [");
+                for (i, tag) in tags.iter().enumerate() {
+                    if i > 0 {
+                        print!(", ");
+                    }
+                    print!("{}", tag);
+                }
+                print!("]");
+            }
+            println!();
+        }
+
+        println!("\nFound {} block device(s)", devices.len());
+    }
     Ok(())
 }
 
@@ -826,6 +952,12 @@ fn suggest_mounts(device_filter: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+fn print_version() {
+    println!("catdog version {}", VERSION);
+    println!("Authors: {}", AUTHORS);
+    println!("Build: {}", env!("CARGO_PKG_VERSION"));
+}
+
 fn get_storage_path() -> PathBuf {
     let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".catdog").join("alerts.json")
@@ -897,30 +1029,386 @@ fn silence_alert(alert_id: &str) -> Result<()> {
     Ok(())
 }
 
+fn get_corpus_path() -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".catdog").join("corpus")
+}
+
+fn corpus_ingest(file_path: &str) -> Result<()> {
+    println!("{} Adding fstab configuration to library...", "📚".bold());
+
+    let content = fs::read_to_string(file_path)
+        .with_context(|| format!("Failed to read {}", file_path))?;
+
+    // Parse the fstab
+    let entries = parse_fstab_from_path(file_path)?;
+
+    if entries.is_empty() {
+        println!("{}", "No valid fstab entries found to ingest".yellow());
+        return Ok(());
+    }
+
+    // Create corpus storage directory
+    let corpus_path = get_corpus_path();
+    fs::create_dir_all(&corpus_path)?;
+
+    // Create a storage file for this config
+    let config_id = uuid::Uuid::new_v4().to_string();
+    let storage_file = corpus_path.join(format!("{}.json", config_id));
+
+    // Store metadata
+    let metadata = serde_json::json!({
+        "id": config_id,
+        "source_file": file_path,
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "entry_count": entries.len(),
+        "entries": entries.iter().map(|e| serde_json::json!({
+            "device": e.device,
+            "mount_point": e.mount_point,
+            "fs_type": e.fs_type,
+            "options": e.options,
+            "dump": e.dump,
+            "pass": e.pass,
+        })).collect::<Vec<_>>(),
+    });
+
+    fs::write(&storage_file, serde_json::to_string_pretty(&metadata)?)?;
+
+    println!("{} Successfully added to configuration library", "✓".green().bold());
+    println!("  {} {}", "Config ID:".cyan(), config_id.bright_white());
+    println!("  {} {}", "Source:".cyan(), file_path);
+    println!("  {} {}", "Entries:".cyan(), entries.len());
+    println!("\n{}", "This configuration can now be searched and referenced.".truecolor(150, 150, 150));
+
+    Ok(())
+}
+
+fn corpus_search(query: &str) -> Result<()> {
+    println!("{} Searching configuration library for: {}\n", "🔍".bold(), query.bright_white());
+
+    let corpus_path = get_corpus_path();
+
+    if !corpus_path.exists() {
+        println!("{}", "No configurations in library yet.".yellow());
+        println!("  Use {} to add fstab files", "catdog corpus ingest <file>".bright_white());
+        return Ok(());
+    }
+
+    let query_lower = query.to_lowercase();
+    let mut matches = Vec::new();
+
+    // Read all stored configurations
+    for entry in fs::read_dir(&corpus_path)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+
+        let content = fs::read_to_string(&path)?;
+        let config: serde_json::Value = serde_json::from_str(&content)?;
+
+        // Search through entries
+        if let Some(entries) = config["entries"].as_array() {
+            for (idx, entry) in entries.iter().enumerate() {
+                let device = entry["device"].as_str().unwrap_or("");
+                let mount_point = entry["mount_point"].as_str().unwrap_or("");
+                let fs_type = entry["fs_type"].as_str().unwrap_or("");
+                let options = entry["options"].as_str().unwrap_or("");
+
+                // Check if query matches any field
+                if device.to_lowercase().contains(&query_lower) ||
+                   mount_point.to_lowercase().contains(&query_lower) ||
+                   fs_type.to_lowercase().contains(&query_lower) ||
+                   options.to_lowercase().contains(&query_lower) {
+                    matches.push((
+                        config["id"].as_str().unwrap_or("unknown").to_string(),
+                        config["source_file"].as_str().unwrap_or("unknown").to_string(),
+                        entry.clone(),
+                    ));
+                }
+            }
+        }
+    }
+
+    if matches.is_empty() {
+        println!("{}", "No matching configurations found.".yellow());
+        return Ok(());
+    }
+
+    println!("{} Found {} matching configuration(s):\n", "✓".green().bold(), matches.len());
+
+    for (config_id, source, entry) in matches {
+        println!("{}", "─".repeat(80).bright_black());
+        println!("{} {} {}",
+                 "From:".cyan().bold(),
+                 source.bright_white(),
+                 format!("({})", &config_id[..8]).truecolor(150, 150, 150));
+        println!("  {} {}", "Device:".cyan(), entry["device"].as_str().unwrap_or(""));
+        println!("  {} {}", "Mount:".cyan(), entry["mount_point"].as_str().unwrap_or(""));
+        println!("  {} {}", "Type:".cyan(), entry["fs_type"].as_str().unwrap_or(""));
+        println!("  {} {}", "Options:".cyan(), entry["options"].as_str().unwrap_or(""));
+        println!();
+    }
+
+    Ok(())
+}
+
+fn corpus_stats() -> Result<()> {
+    println!("{} Configuration Library Statistics\n", "📊".bold());
+
+    let corpus_path = get_corpus_path();
+
+    if !corpus_path.exists() {
+        println!("{}", "No configurations in library yet.".yellow());
+        println!("  Use {} to add fstab files", "catdog corpus ingest <file>".bright_white());
+        return Ok(());
+    }
+
+    let mut total_configs = 0;
+    let mut total_entries = 0;
+    let mut fs_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut mount_options: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+    // Read all stored configurations
+    for entry in fs::read_dir(&corpus_path)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+
+        total_configs += 1;
+
+        let content = fs::read_to_string(&path)?;
+        let config: serde_json::Value = serde_json::from_str(&content)?;
+
+        if let Some(entries) = config["entries"].as_array() {
+            total_entries += entries.len();
+
+            for entry in entries {
+                // Count filesystem types
+                if let Some(fs_type) = entry["fs_type"].as_str() {
+                    *fs_types.entry(fs_type.to_string()).or_insert(0) += 1;
+                }
+
+                // Count mount options
+                if let Some(options) = entry["options"].as_str() {
+                    for opt in options.split(',') {
+                        *mount_options.entry(opt.trim().to_string()).or_insert(0) += 1;
+                    }
+                }
+            }
+        }
+    }
+
+    println!("{}", "Library Overview:".cyan().bold());
+    println!("  {} {}", "Configurations:".truecolor(150, 150, 150), total_configs.to_string().bright_white());
+    println!("  {} {}", "Total Entries:".truecolor(150, 150, 150), total_entries.to_string().bright_white());
+
+    if !fs_types.is_empty() {
+        println!("\n{}", "Filesystem Types:".cyan().bold());
+        let mut fs_vec: Vec<_> = fs_types.iter().collect();
+        fs_vec.sort_by(|a, b| b.1.cmp(a.1));
+        for (fs, count) in fs_vec.iter().take(10) {
+            println!("  {} {} ({})", "•".blue(), fs.bright_white(), count.to_string().truecolor(150, 150, 150));
+        }
+    }
+
+    if !mount_options.is_empty() {
+        println!("\n{}", "Most Common Mount Options:".cyan().bold());
+        let mut opts_vec: Vec<_> = mount_options.iter().collect();
+        opts_vec.sort_by(|a, b| b.1.cmp(a.1));
+        for (opt, count) in opts_vec.iter().take(10) {
+            println!("  {} {} ({})", "•".blue(), opt.bright_white(), count.to_string().truecolor(150, 150, 150));
+        }
+    }
+
+    println!("\n{}", "Use 'catdog corpus search <query>' to find specific configurations".truecolor(150, 150, 150));
+
+    Ok(())
+}
+
+fn generate_fstab(output_file: Option<&str>) -> Result<()> {
+    println!("{} Generating fstab entries...\n", "🔧".bold());
+
+    let devices = discover_block_devices()?;
+
+    if devices.is_empty() {
+        println!("{}", "No block devices found".yellow());
+        return Ok(());
+    }
+
+    // Build the fstab content
+    let mut fstab_content = String::new();
+
+    // Add header
+    fstab_content.push_str("# /etc/fstab: static file system information\n");
+    fstab_content.push_str("#\n");
+    fstab_content.push_str("# Generated by catdog - A filesystem utility that takes itself way too seriously\n");
+    fstab_content.push_str(&format!("# Generated at: {}\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+    fstab_content.push_str("#\n");
+    fstab_content.push_str("# <device>                                <mount point>    <type>  <options>              <dump> <pass>\n");
+    fstab_content.push_str("#\n\n");
+
+    let mut entry_count = 0;
+
+    // Generate entries for each device
+    for device in devices {
+        // Skip devices that are already mounted at system locations
+        if let Some(ref mp) = device.mount_point {
+            if mp == "/" || mp == "/boot" || mp == "/boot/efi" {
+                continue;
+            }
+        }
+
+        // Skip if no filesystem
+        if device.fs_type.is_none() {
+            continue;
+        }
+
+        let suggestion = suggest_mount_options(&device);
+
+        // Add comment with device info
+        fstab_content.push_str(&format!("# Device: {}\n", device.device));
+        if let Some(ref label) = device.label {
+            fstab_content.push_str(&format!("# Label: {}\n", label));
+        }
+        if let Some(ref size) = device.size {
+            fstab_content.push_str(&format!("# Size: {}\n", size));
+        }
+        if device.is_ssd {
+            fstab_content.push_str("# Type: SSD (optimized options applied)\n");
+        }
+        if device.is_removable {
+            fstab_content.push_str("# Type: Removable (nofail option applied)\n");
+        }
+
+        // Add the fstab entry
+        fstab_content.push_str(&format!(
+            "{:<40} {:<20} {:<7} {:<22} {} {}\n",
+            suggestion.suggested_device_id,
+            suggestion.suggested_mount_point,
+            suggestion.suggested_fs_type,
+            suggestion.suggested_options.join(","),
+            "0",
+            if suggestion.suggested_mount_point == "/" { "1" } else { "2" }
+        ));
+        fstab_content.push('\n');
+
+        entry_count += 1;
+    }
+
+    if entry_count == 0 {
+        println!("{}", "No devices found that need fstab entries".yellow());
+        println!("  Discovered devices are either already mounted at system locations");
+        println!("  or don't have filesystems that can be mounted.");
+        return Ok(());
+    }
+
+    // Add footer
+    fstab_content.push_str("# End of generated fstab entries\n");
+    fstab_content.push_str(&format!("# Total entries generated: {}\n", entry_count));
+    fstab_content.push_str("#\n");
+    fstab_content.push_str("# IMPORTANT: Review these entries carefully before using!\n");
+    fstab_content.push_str("# 1. Create mount point directories: sudo mkdir -p <mount_point>\n");
+    fstab_content.push_str("# 2. Test with: sudo mount -a\n");
+    fstab_content.push_str("# 3. Check with: df -h\n");
+
+    // Output the result
+    match output_file {
+        Some(file_path) => {
+            fs::write(file_path, &fstab_content)
+                .with_context(|| format!("Failed to write to {}", file_path))?;
+            println!("{} Generated fstab written to: {}",
+                     "✓".green().bold(),
+                     file_path.bright_white());
+            println!("\n{}", "Next steps:".cyan().bold());
+            println!("  1. Review the file: {}", format!("cat {}", file_path).bright_white());
+            println!("  2. Create mount directories for each entry");
+            println!("  3. Back up your current fstab: {}",
+                     "sudo cp /etc/fstab /etc/fstab.backup".bright_white());
+            println!("  4. Merge with your existing fstab if needed");
+            println!("\n{} Generated {} fstab entries",
+                     "📝".bold(),
+                     entry_count.to_string().green().bold());
+        }
+        None => {
+            // Print to stdout
+            println!("{}", "Generated fstab content:".cyan().bold());
+            println!("{}", "=".repeat(100).bright_black());
+            print!("{}", fstab_content);
+            println!("{}", "=".repeat(100).bright_black());
+            println!("\n{}", "To save to a file, use:".cyan().bold());
+            println!("  {}",
+                     "catdog generate fstab.new".bright_white());
+            println!("\n{} Generated {} fstab entries",
+                     "📝".bold(),
+                     entry_count.to_string().green().bold());
+        }
+    }
+
+    Ok(())
+}
+
+fn backup_file(file_path: &str) -> Result<PathBuf> {
+    let source = Path::new(file_path);
+    if !source.exists() {
+        anyhow::bail!("Source file does not exist: {}", file_path);
+    }
+
+    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+    let backup_name = format!("{}.backup.{}", file_path, timestamp);
+    let backup_path = PathBuf::from(&backup_name);
+
+    fs::copy(source, &backup_path)
+        .with_context(|| format!("Failed to create backup at {}", backup_name))?;
+
+    info!("Created backup: {}", backup_name);
+    Ok(backup_path)
+}
+
 fn print_help() {
-    println!("{} {} An fstab utility with PagerDuty-like alerting!",
+    println!("{} {} A professional filesystem management tool",
         "catdog".bright_green().bold(),
-        "-".bright_black());
+        VERSION.bright_black());
     println!("\n{}", "USAGE:".cyan().bold());
-    println!("    catdog <COMMAND>\n");
+    println!("    catdog [FLAGS] <COMMAND> [ARGS]\n");
+
+    println!("{}", "FLAGS:".cyan().bold());
+    println!("    {}         Output in JSON format (for automation)", "--json".bright_yellow());
+    println!("    {}      Disable colored output", "--no-color".bright_yellow());
+    println!("    {}       Show preview without making changes", "--dry-run".bright_yellow());
+    println!("    {}    Enable verbose logging", "-v, --verbose".bright_yellow());
+    println!("    {}  Show version information", "-V, --version".bright_yellow());
+    println!();
 
     println!("{} {}", "FILESYSTEM".cyan().bold(), "COMMANDS:".cyan().bold());
-    println!("    {}          Display raw /etc/fstab file (like cat)", "cat".bright_yellow());
-    println!("    {}          Fetch and parse /etc/fstab in a nice table (like a dog fetching!)", "dog".bright_yellow());
+    println!("    {}          Display raw /etc/fstab file", "cat".bright_yellow());
+    println!("    {}          Parse and display /etc/fstab in table format", "dog".bright_yellow());
     println!("    {}     List all mount points", "list, ls".bright_yellow());
     println!("    {}  Find entries matching device or mount point", "find <term>".bright_yellow());
     println!("    {}     Check /etc/fstab for common issues", "validate".bright_yellow());
-    println!("    {}    Discover available block devices", "discover".bright_yellow());
+    println!("    {}    Discover available block devices (supports --json)", "discover".bright_yellow());
     println!("    {}       Generate smart mount suggestions for devices", "suggest [device]".bright_yellow());
+    println!("    {}       Generate complete fstab from discovered devices", "generate [file]".bright_yellow());
+    println!("    {}      Create timestamped backup of fstab", "backup [file]".bright_yellow());
 
-    println!("\n{} {}", "ALERTING".cyan().bold(), "COMMANDS:".cyan().bold());
+    println!("\n{} {} {}", "BARK".cyan().bold(), "(ALERTING)".bright_black(), "COMMANDS:".cyan().bold());
     println!("    {}       Run filesystem health checks once", "check".bright_yellow());
     println!("    {}       Start continuous monitoring (default: 300s interval)", "monitor [interval]".bright_yellow());
-    println!("    {}        List all alerts (optionally filter: firing/acknowledged/resolved/silenced)", "alerts [status]".bright_yellow());
-    println!("    {}       Show detailed information about an alert", "alert <id>".bright_yellow());
-    println!("    {}         Acknowledge an alert", "ack <id>".bright_yellow());
-    println!("    {}        Resolve an alert", "resolve <id>".bright_yellow());
-    println!("    {}       Silence an alert", "silence <id>".bright_yellow());
+    println!("    {}        List all barks (optionally filter: firing/acknowledged/resolved/silenced)", "barks [status]".bright_yellow());
+    println!("    {}         Show detailed information about a bark", "bark <id>".bright_yellow());
+    println!("    {}           Acknowledge a bark (alias: pet)", "ack <id>".bright_yellow());
+    println!("    {}      Resolve a bark (alias: quiet)", "resolve <id>".bright_yellow());
+    println!("    {}     Silence a bark (alias: hush)", "silence <id>".bright_yellow());
+
+    println!("\n{} {}", "CORPUS".cyan().bold(), "COMMANDS:".cyan().bold());
+    println!("    {}       Ingest a file into the corpus", "corpus ingest <file>".bright_yellow());
+    println!("    {}       Search the corpus", "corpus search <query>".bright_yellow());
+    println!("    {}       Show corpus statistics", "corpus stats".bright_yellow());
 
     println!("\n    {}         Show this help message", "help".bright_yellow());
 
@@ -931,13 +1419,14 @@ fn print_help() {
     println!("    catdog validate            {} Check for common issues", "#".bright_black());
     println!("    catdog discover            {} List all block devices with details", "#".bright_black());
     println!("    catdog suggest             {} Generate fstab entries with smart defaults", "#".bright_black());
+    println!("    catdog generate fstab.new  {} Generate complete fstab file", "#".bright_black());
     println!("    catdog check               {} Run health checks once", "#".bright_black());
     println!("    catdog monitor 60          {} Start monitoring with 60s interval", "#".bright_black());
-    println!("    catdog alerts              {} List all alerts", "#".bright_black());
-    println!("    catdog alerts firing       {} List only firing alerts", "#".bright_black());
-    println!("    catdog alert <id>          {} Show alert details", "#".bright_black());
-    println!("    catdog ack <id>            {} Acknowledge an alert", "#".bright_black());
-    println!("    catdog resolve <id>        {} Resolve an alert", "#".bright_black());
+    println!("    catdog barks               {} List all barks (alerts)", "#".bright_black());
+    println!("    catdog barks firing        {} List only firing barks", "#".bright_black());
+    println!("    catdog bark <id>           {} Show bark details", "#".bright_black());
+    println!("    catdog pet <id>            {} Pet the dog (acknowledge bark)", "#".bright_black());
+    println!("    catdog quiet <id>          {} Quiet the dog (resolve bark)", "#".bright_black());
 }
 
 #[cfg(test)]

@@ -93,3 +93,15 @@ pub enum CorpusError {
     DimensionalityMismatch,
     ConcurrencyError,
 }
+
+impl std::fmt::Display for CorpusError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            CorpusError::IndexingError(msg) => write!(f, "Indexing error: {}", msg),
+            CorpusError::DimensionalityMismatch => write!(f, "Dimensionality mismatch"),
+            CorpusError::ConcurrencyError => write!(f, "Concurrency error"),
+        }
+    }
+}
+
+impl std::error::Error for CorpusError {}

@@ -3,7 +3,7 @@
 /// Provides dense and sparse vector representations with optimized
 /// linear algebra operations utilizing SIMD when available.
 
-use std::ops::{Add, Sub, Mul};
+use std::ops::{Add, Mul};
 
 /// Dense vector with contiguous memory layout for cache efficiency
 #[derive(Debug, Clone)]

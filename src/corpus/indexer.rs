@@ -72,9 +72,12 @@ impl CorpusIndex {
 
     fn index_lsh(&mut self, vector: &[f64], doc_id: &str) {
         // Compute multiple hash values for LSH
+        let hashes: Vec<u64> = (0..self.lsh_tables.len())
+            .map(|i| self.compute_lsh_hash(vector, i))
+            .collect();
+
         for (i, table) in self.lsh_tables.iter_mut().enumerate() {
-            let hash = self.compute_lsh_hash(vector, i);
-            table.entry(hash)
+            table.entry(hashes[i])
                 .or_insert_with(Vec::new)
                 .push(doc_id.to_string());
         }
