@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
+use chrono::{DateTime, Utc};
 use colored::*;
-use log::{debug, info, warn, error};
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use chrono::{DateTime, Utc};
 
 const MAX_BACKUPS_PER_FILE: usize = 10;
 const BACKUP_DIR_NAME: &str = ".catdog_backups";
@@ -150,7 +150,11 @@ pub fn create_backup(
     let _ = emit_backup_event(
         BackupEventType::BackupCreated,
         file_path,
-        &format!("Backup created: {} bytes, checksum {}", size_bytes, &checksum[..16]),
+        &format!(
+            "Backup created: {} bytes, checksum {}",
+            size_bytes,
+            &checksum[..16]
+        ),
         EventSeverity::Info,
     );
 
@@ -692,9 +696,7 @@ pub struct BackupAge {
 
 impl BackupHealthCheck {
     pub fn is_healthy(&self) -> bool {
-        self.corrupted_backups.is_empty()
-            && self.errors.is_empty()
-            && self.healthy_backups > 0
+        self.corrupted_backups.is_empty() && self.errors.is_empty() && self.healthy_backups > 0
     }
 
     pub fn display(&self) {
@@ -710,7 +712,11 @@ impl BackupHealthCheck {
         println!("  {} {}", "Total Backups:".cyan(), self.total_backups);
         println!("  {} {}", "Healthy:".green(), self.healthy_backups);
         println!("  {} {}", "Corrupted:".red(), self.corrupted_backups.len());
-        println!("  {} {}", "Missing Metadata:".yellow(), self.missing_metadata.len());
+        println!(
+            "  {} {}",
+            "Missing Metadata:".yellow(),
+            self.missing_metadata.len()
+        );
 
         if !self.corrupted_backups.is_empty() {
             println!("\n{}", "❌ Corrupted Backups:".red().bold());
@@ -729,7 +735,8 @@ impl BackupHealthCheck {
         if !self.old_backups.is_empty() {
             println!("\n{}", "📅 Stale Backups (>30 days):".blue().bold());
             for age in &self.old_backups {
-                println!("  {} {} ({} days old)",
+                println!(
+                    "  {} {} ({} days old)",
                     "•".blue(),
                     age.file_path.bright_white(),
                     age.days_since_backup.to_string().yellow()
@@ -769,7 +776,9 @@ pub fn run_health_check() -> Result<BackupHealthCheck> {
     };
 
     if !backup_base.exists() {
-        health.warnings.push("No backup directory found. No backups have been created yet.".to_string());
+        health
+            .warnings
+            .push("No backup directory found. No backups have been created yet.".to_string());
         return Ok(health);
     }
 
@@ -804,7 +813,9 @@ pub fn run_health_check() -> Result<BackupHealthCheck> {
                                         health.healthy_backups += 1;
 
                                         // Check age
-                                        if let Ok(age_days) = calculate_backup_age(&metadata.timestamp) {
+                                        if let Ok(age_days) =
+                                            calculate_backup_age(&metadata.timestamp)
+                                        {
                                             if age_days > 30 {
                                                 health.old_backups.push(BackupAge {
                                                     file_path: metadata.original_path.clone(),
@@ -819,12 +830,20 @@ pub fn run_health_check() -> Result<BackupHealthCheck> {
                                     }
                                 }
                                 Err(e) => {
-                                    health.errors.push(format!("Failed to verify {}: {}", path.display(), e));
+                                    health.errors.push(format!(
+                                        "Failed to verify {}: {}",
+                                        path.display(),
+                                        e
+                                    ));
                                 }
                             }
                         }
                         Err(e) => {
-                            health.errors.push(format!("Failed to load metadata for {}: {}", path.display(), e));
+                            health.errors.push(format!(
+                                "Failed to load metadata for {}: {}",
+                                path.display(),
+                                e
+                            ));
                         }
                     }
                 }
@@ -842,9 +861,10 @@ fn calculate_backup_age(timestamp: &str) -> Result<i64> {
     let month: u32 = date_str[4..6].parse()?;
     let day: u32 = date_str[6..8].parse()?;
 
-    let backup_date = chrono::NaiveDate::from_ymd_opt(year, month, day)
-        .context("Invalid date in timestamp")?;
-    let backup_datetime = backup_date.and_hms_opt(0, 0, 0)
+    let backup_date =
+        chrono::NaiveDate::from_ymd_opt(year, month, day).context("Invalid date in timestamp")?;
+    let backup_datetime = backup_date
+        .and_hms_opt(0, 0, 0)
         .context("Failed to create datetime")?;
 
     let now = Utc::now().naive_utc();
@@ -887,11 +907,20 @@ impl RestorationDrill {
         println!("  {} {} ms", "Duration:".cyan(), self.duration_ms);
 
         if success_rate == 100.0 {
-            println!("\n{} All backups verified successfully!", "✓".green().bold());
+            println!(
+                "\n{} All backups verified successfully!",
+                "✓".green().bold()
+            );
         } else if success_rate >= 90.0 {
-            println!("\n{} Most backups verified, some issues found", "⚠️".yellow().bold());
+            println!(
+                "\n{} Most backups verified, some issues found",
+                "⚠️".yellow().bold()
+            );
         } else {
-            println!("\n{} Critical: Many backups cannot be restored!", "❌".red().bold());
+            println!(
+                "\n{} Critical: Many backups cannot be restored!",
+                "❌".red().bold()
+            );
         }
 
         if !self.failed.is_empty() {
@@ -905,9 +934,15 @@ impl RestorationDrill {
 
         println!("\n{}", "─".repeat(80).bright_black());
         if self.failed.is_empty() {
-            println!("{} All critical files can be safely restored from backup", "✓".green().bold());
+            println!(
+                "{} All critical files can be safely restored from backup",
+                "✓".green().bold()
+            );
         } else {
-            println!("{} Action required: Fix failed backups before disaster strikes!", "⚠️".yellow().bold());
+            println!(
+                "{} Action required: Fix failed backups before disaster strikes!",
+                "⚠️".yellow().bold()
+            );
         }
     }
 }
@@ -960,24 +995,34 @@ pub fn run_restoration_drill() -> Result<RestorationDrill> {
                                             match verify_backup(path, original) {
                                                 Ok(_) => {
                                                     drill.successful += 1;
-                                                    debug!("✓ Verified: {}", metadata.original_path);
+                                                    debug!(
+                                                        "✓ Verified: {}",
+                                                        metadata.original_path
+                                                    );
                                                 }
                                                 Err(e) => {
                                                     // Original has changed - this is OK, just note it
                                                     drill.successful += 1;
-                                                    debug!("Original file modified: {} ({})", metadata.original_path, e);
+                                                    debug!(
+                                                        "Original file modified: {} ({})",
+                                                        metadata.original_path, e
+                                                    );
                                                 }
                                             }
                                         } else {
                                             // Original doesn't exist - backup can still be restored
                                             drill.successful += 1;
-                                            debug!("✓ Backup valid (original file missing): {}", metadata.original_path);
+                                            debug!(
+                                                "✓ Backup valid (original file missing): {}",
+                                                metadata.original_path
+                                            );
                                         }
                                     } else {
                                         drill.failed.push(DrillFailure {
                                             backup_path: path.display().to_string(),
                                             original_path: metadata.original_path.clone(),
-                                            error: "Checksum mismatch - backup is corrupted".to_string(),
+                                            error: "Checksum mismatch - backup is corrupted"
+                                                .to_string(),
                                         });
                                     }
                                 }
@@ -1005,7 +1050,10 @@ pub fn run_restoration_drill() -> Result<RestorationDrill> {
 
     drill.duration_ms = start.elapsed().as_millis();
 
-    info!("Restoration drill completed: {}/{} successful", drill.successful, drill.total_tested);
+    info!(
+        "Restoration drill completed: {}/{} successful",
+        drill.successful, drill.total_tested
+    );
 
     Ok(drill)
 }
@@ -1060,7 +1108,10 @@ impl BackupEvent {
     }
 
     pub fn should_alert(&self) -> bool {
-        matches!(self.severity, EventSeverity::Warning | EventSeverity::Critical)
+        matches!(
+            self.severity,
+            EventSeverity::Warning | EventSeverity::Critical
+        )
     }
 }
 

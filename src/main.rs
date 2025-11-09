@@ -2431,14 +2431,21 @@ fn backup_health_cmd() -> Result<()> {
         let _ = backup::emit_backup_event(
             backup::BackupEventType::HealthCheckPassed,
             "all",
-            &format!("{}/{} backups healthy", health.healthy_backups, health.total_backups),
+            &format!(
+                "{}/{} backups healthy",
+                health.healthy_backups, health.total_backups
+            ),
             backup::EventSeverity::Info,
         );
     } else {
         let _ = backup::emit_backup_event(
             backup::BackupEventType::HealthCheckFailed,
             "all",
-            &format!("{} corrupted, {} errors", health.corrupted_backups.len(), health.errors.len()),
+            &format!(
+                "{} corrupted, {} errors",
+                health.corrupted_backups.len(),
+                health.errors.len()
+            ),
             backup::EventSeverity::Critical,
         );
     }
@@ -2453,7 +2460,10 @@ fn backup_health_cmd() -> Result<()> {
 
 fn backup_drill_cmd() -> Result<()> {
     println!("{} Running backup restoration drill...\n", "🎯".bold());
-    println!("{} This will verify all backups can be restored (read-only test)\n", "ℹ️".blue());
+    println!(
+        "{} This will verify all backups can be restored (read-only test)\n",
+        "ℹ️".blue()
+    );
 
     let drill = backup::run_restoration_drill()?;
     drill.display();
@@ -2469,14 +2479,21 @@ fn backup_drill_cmd() -> Result<()> {
         let _ = backup::emit_backup_event(
             backup::BackupEventType::DrillPassed,
             "all",
-            &format!("{}/{} backups verified in {} ms", drill.successful, drill.total_tested, drill.duration_ms),
+            &format!(
+                "{}/{} backups verified in {} ms",
+                drill.successful, drill.total_tested, drill.duration_ms
+            ),
             backup::EventSeverity::Info,
         );
     } else {
         let _ = backup::emit_backup_event(
             backup::BackupEventType::DrillFailed,
             "all",
-            &format!("{} of {} backups failed verification", drill.failed.len(), drill.total_tested),
+            &format!(
+                "{} of {} backups failed verification",
+                drill.failed.len(),
+                drill.total_tested
+            ),
             backup::EventSeverity::Warning,
         );
     }
