@@ -13,6 +13,10 @@ A command-line tool for managing `/etc/fstab`, discovering block devices, and mo
 - **Bark alerts** when disk usage is high or filesystem issues detected
 - **Validate** fstab entries before you reboot
 - **Build a library** of fstab configurations for searching and reference
+- **Package management** - Unified interface for apt, dnf, yum, pacman, zypper, brew, and apk
+- **Cross-platform** package operations with automatic package manager detection
+- **Service management** - Control services across systemd, launchd, init.d, and OpenRC
+- **System information** - Comprehensive hardware and OS details with JSON output
 
 ## Installation
 
@@ -75,7 +79,10 @@ catdog monitor 300
 | `catdog discover` | List all block devices with details (supports `--json`) |
 | `catdog suggest [device]` | Get smart mount suggestions for devices |
 | `catdog generate [file]` | Generate complete fstab from discovered devices |
-| `catdog backup [file]` | Create timestamped backup of fstab |
+| `catdog backup [file]` | Create verified backup with SHA-256 checksum and metadata |
+| `catdog restore <backup>` | Restore from backup (use --force to override safety checks) |
+| `catdog list-backups <file>` | List all backups for a specific file |
+| `catdog backup-stats` | Show backup statistics and disk usage |
 
 ### Bark (Monitoring & Alerts)
 
@@ -220,6 +227,93 @@ This is useful for:
 - Finding examples of how to mount specific filesystems
 - Tracking mount options across multiple servers
 - Building a knowledge base of working configurations
+
+## Package Management
+
+catdog provides a unified interface for managing packages across different Linux distributions and macOS. It automatically detects your system's package manager and translates commands accordingly.
+
+### Supported Package Managers
+
+- **apt** (Debian/Ubuntu)
+- **dnf** (Fedora/RHEL 8+)
+- **yum** (CentOS/RHEL 7)
+- **pacman** (Arch Linux)
+- **zypper** (openSUSE)
+- **brew** (macOS)
+- **apk** (Alpine Linux)
+
+### Package Commands
+
+| Command | Description |
+|---------|-------------|
+| `catdog pkg install <pkg...>` | Install one or more packages |
+| `catdog pkg remove <pkg...>` | Remove one or more packages |
+| `catdog pkg update` | Update package cache/repositories |
+| `catdog pkg upgrade` | Upgrade all installed packages |
+| `catdog pkg search <query>` | Search for packages |
+| `catdog pkg list` | List all installed packages |
+| `catdog pkg info <package>` | Check if a package is installed |
+
+### Package Management Examples
+
+```bash
+# Install packages
+catdog pkg install nginx
+catdog pkg install docker vim git
+
+# Test install with dry-run
+catdog --dry-run pkg install postgresql
+
+# Remove packages
+catdog pkg remove nginx
+
+# Update package cache
+catdog pkg update
+
+# Upgrade all packages
+catdog pkg upgrade
+
+# Search for packages
+catdog pkg search python
+catdog pkg search docker
+
+# List all installed packages
+catdog pkg list
+
+# Get package list as JSON
+catdog pkg list --json
+
+# Check if a package is installed
+catdog pkg info nginx
+```
+
+**Example output:**
+```bash
+$ catdog pkg search docker
+🔍 Searching for packages matching: docker
+
+✓ Found 12 package(s):
+
+  • docker - Container runtime
+  • docker-compose - Multi-container orchestration
+  • docker-buildx - Docker CLI plugin for BuildKit
+  ...
+```
+
+### Why use catdog for package management?
+
+1. **Unified Interface**: Same commands work across all distros
+2. **JSON Output**: Perfect for automation and scripts
+3. **Dry-run Mode**: Test package operations safely
+4. **Fast**: Written in Rust, single binary
+5. **Simple**: No need to remember distro-specific commands
+
+**Comparison with Ansible:**
+- ✅ No Python dependencies required
+- ✅ Single binary, instant execution
+- ✅ Interactive and scriptable
+- ✅ Works with existing package managers (no abstractions)
+- ✅ Perfect for quick operations and testing
 
 ## Automation & Integration
 

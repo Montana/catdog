@@ -8,11 +8,15 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
 mod alerts;
+mod backup;
 mod config;
 mod corpus;
 mod diff;
 mod error;
 mod monitor;
+mod package;
+mod service;
+mod sysinfo;
 
 use alerts::{display_alert_detail, display_alerts, AlertManager, AlertStatus};
 use config::Config;
@@ -145,13 +149,27 @@ fn run() -> Result<()> {
         "discover" => discover_devices(&config),
         "backup" => {
             if non_flag_args.len() < 3 {
-                backup_file("/etc/fstab", config.dry_run)
-                    .map(|path| println!("Backup created: {}", path.display()))
+                backup_file_cmd("/etc/fstab", config.dry_run)
             } else {
-                backup_file(&non_flag_args[2], config.dry_run)
-                    .map(|path| println!("Backup created: {}", path.display()))
+                backup_file_cmd(&non_flag_args[2], config.dry_run)
             }
         }
+        "restore" => {
+            if args.len() < 3 {
+                eprintln!("{}", "Usage: catdog restore <backup_path> [--force]".red());
+                process::exit(1);
+            }
+            let force = args.contains(&"--force".to_string());
+            restore_backup_cmd(&args[2], config.dry_run, force)
+        }
+        "list-backups" => {
+            if args.len() < 3 {
+                eprintln!("{}", "Usage: catdog list-backups <file>".red());
+                process::exit(1);
+            }
+            list_backups_cmd(&args[2])
+        }
+        "backup-stats" => backup_stats_cmd(),
         "suggest" => {
             let device_filter = if args.len() >= 3 {
                 Some(args[2].as_str())
@@ -247,6 +265,131 @@ fn run() -> Result<()> {
                     eprintln!(
                         "{}",
                         "Unknown corpus command. Try: ingest, search, stats".red()
+                    );
+                    process::exit(1);
+                }
+            }
+        }
+        // Service management commands
+        "service" | "svc" => {
+            if args.len() < 3 {
+                eprintln!(
+                    "{}",
+                    "Usage: catdog service <start|stop|restart|enable|disable|status|list>".red()
+                );
+                process::exit(1);
+            }
+            match args[2].as_str() {
+                "start" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog service start <service>".red());
+                        process::exit(1);
+                    }
+                    service_start(&args[3], &config)
+                }
+                "stop" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog service stop <service>".red());
+                        process::exit(1);
+                    }
+                    service_stop(&args[3], &config)
+                }
+                "restart" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog service restart <service>".red());
+                        process::exit(1);
+                    }
+                    service_restart(&args[3], &config)
+                }
+                "enable" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog service enable <service>".red());
+                        process::exit(1);
+                    }
+                    service_enable(&args[3], &config)
+                }
+                "disable" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog service disable <service>".red());
+                        process::exit(1);
+                    }
+                    service_disable(&args[3], &config)
+                }
+                "status" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog service status <service>".red());
+                        process::exit(1);
+                    }
+                    service_status(&args[3], &config)
+                }
+                "list" => service_list(&config),
+                _ => {
+                    eprintln!(
+                        "{}",
+                        "Unknown service command. Try: start, stop, restart, enable, disable, status, list"
+                            .red()
+                    );
+                    process::exit(1);
+                }
+            }
+        }
+        // System information command
+        "info" | "sysinfo" => sys_info(&config),
+        // Package management commands
+        "pkg" | "package" => {
+            if args.len() < 3 {
+                eprintln!(
+                    "{}",
+                    "Usage: catdog pkg <install|remove|update|upgrade|search|list|info>".red()
+                );
+                process::exit(1);
+            }
+            match args[2].as_str() {
+                "install" | "add" => {
+                    if args.len() < 4 {
+                        eprintln!(
+                            "{}",
+                            "Usage: catdog pkg install <package1> [package2...]".red()
+                        );
+                        process::exit(1);
+                    }
+                    let packages: Vec<String> = args[3..].to_vec();
+                    pkg_install(&packages, &config)
+                }
+                "remove" | "uninstall" | "delete" => {
+                    if args.len() < 4 {
+                        eprintln!(
+                            "{}",
+                            "Usage: catdog pkg remove <package1> [package2...]".red()
+                        );
+                        process::exit(1);
+                    }
+                    let packages: Vec<String> = args[3..].to_vec();
+                    pkg_remove(&packages, &config)
+                }
+                "update" | "refresh" => pkg_update(&config),
+                "upgrade" => pkg_upgrade(&config),
+                "search" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog pkg search <query>".red());
+                        process::exit(1);
+                    }
+                    let query = args[3..].join(" ");
+                    pkg_search(&query, &config)
+                }
+                "list" | "installed" => pkg_list(&config),
+                "info" | "check" => {
+                    if args.len() < 4 {
+                        eprintln!("{}", "Usage: catdog pkg info <package>".red());
+                        process::exit(1);
+                    }
+                    pkg_info(&args[3], &config)
+                }
+                _ => {
+                    eprintln!(
+                        "{}",
+                        "Unknown package command. Try: install, remove, update, upgrade, search, list, info"
+                            .red()
                     );
                     process::exit(1);
                 }
@@ -1430,6 +1573,637 @@ fn corpus_stats() -> Result<()> {
     Ok(())
 }
 
+// Service management functions
+fn service_start(service_name: &str, config: &CliConfig) -> Result<()> {
+    println!("{} Starting service...\n", "⚙️".bold());
+
+    let sm = service::detect_service_manager()?;
+    println!(
+        "{} {}",
+        "Detected service manager:".cyan(),
+        sm.name().bright_white()
+    );
+
+    if sm == service::ServiceManager::Unknown {
+        anyhow::bail!("Unable to detect service manager on this system");
+    }
+
+    println!();
+    service::start_service(service_name, &sm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!(
+            "\n{} Service {} started",
+            "✓".green().bold(),
+            service_name.bright_white()
+        );
+    }
+
+    Ok(())
+}
+
+fn service_stop(service_name: &str, config: &CliConfig) -> Result<()> {
+    println!("{} Stopping service...\n", "⚙️".bold());
+
+    let sm = service::detect_service_manager()?;
+    println!(
+        "{} {}",
+        "Detected service manager:".cyan(),
+        sm.name().bright_white()
+    );
+
+    if sm == service::ServiceManager::Unknown {
+        anyhow::bail!("Unable to detect service manager on this system");
+    }
+
+    println!();
+    service::stop_service(service_name, &sm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!(
+            "\n{} Service {} stopped",
+            "✓".green().bold(),
+            service_name.bright_white()
+        );
+    }
+
+    Ok(())
+}
+
+fn service_restart(service_name: &str, config: &CliConfig) -> Result<()> {
+    println!("{} Restarting service...\n", "🔄".bold());
+
+    let sm = service::detect_service_manager()?;
+    println!(
+        "{} {}",
+        "Detected service manager:".cyan(),
+        sm.name().bright_white()
+    );
+
+    if sm == service::ServiceManager::Unknown {
+        anyhow::bail!("Unable to detect service manager on this system");
+    }
+
+    println!();
+    service::restart_service(service_name, &sm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!(
+            "\n{} Service {} restarted",
+            "✓".green().bold(),
+            service_name.bright_white()
+        );
+    }
+
+    Ok(())
+}
+
+fn service_enable(service_name: &str, config: &CliConfig) -> Result<()> {
+    println!("{} Enabling service...\n", "⚙️".bold());
+
+    let sm = service::detect_service_manager()?;
+    println!(
+        "{} {}",
+        "Detected service manager:".cyan(),
+        sm.name().bright_white()
+    );
+
+    if sm == service::ServiceManager::Unknown {
+        anyhow::bail!("Unable to detect service manager on this system");
+    }
+
+    println!();
+    service::enable_service(service_name, &sm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!(
+            "\n{} Service {} enabled",
+            "✓".green().bold(),
+            service_name.bright_white()
+        );
+    }
+
+    Ok(())
+}
+
+fn service_disable(service_name: &str, config: &CliConfig) -> Result<()> {
+    println!("{} Disabling service...\n", "⚙️".bold());
+
+    let sm = service::detect_service_manager()?;
+    println!(
+        "{} {}",
+        "Detected service manager:".cyan(),
+        sm.name().bright_white()
+    );
+
+    if sm == service::ServiceManager::Unknown {
+        anyhow::bail!("Unable to detect service manager on this system");
+    }
+
+    println!();
+    service::disable_service(service_name, &sm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!(
+            "\n{} Service {} disabled",
+            "✓".green().bold(),
+            service_name.bright_white()
+        );
+    }
+
+    Ok(())
+}
+
+fn service_status(service_name: &str, config: &CliConfig) -> Result<()> {
+    let sm = service::detect_service_manager()?;
+
+    if sm == service::ServiceManager::Unknown {
+        anyhow::bail!("Unable to detect service manager on this system");
+    }
+
+    let info = service::get_service_status(service_name, &sm)?;
+
+    if config.json_output {
+        println!("{}", serde_json::to_string_pretty(&info)?);
+    } else {
+        println!("{} Service Status\n", "ℹ️".bold());
+        println!("{} {}", "Service:".cyan().bold(), info.name.bright_white());
+
+        let status_str = match info.status {
+            service::ServiceStatus::Running => "Running ✓".green().bold(),
+            service::ServiceStatus::Stopped => "Stopped".yellow(),
+            service::ServiceStatus::Failed => "Failed ✗".red().bold(),
+            service::ServiceStatus::Unknown => "Unknown".bright_black(),
+        };
+
+        println!("{} {}", "Status:".cyan(), status_str);
+
+        if let Some(enabled) = info.enabled {
+            let enabled_str = if enabled {
+                "Enabled ✓".green()
+            } else {
+                "Disabled".yellow()
+            };
+            println!("{} {}", "Enabled:".cyan(), enabled_str);
+        }
+
+        if let Some(pid) = info.pid {
+            println!("{} {}", "PID:".cyan(), pid.to_string().bright_white());
+        }
+    }
+
+    Ok(())
+}
+
+fn service_list(config: &CliConfig) -> Result<()> {
+    println!("{} Listing services...\n", "📋".bold());
+
+    let sm = service::detect_service_manager()?;
+
+    if sm == service::ServiceManager::Unknown {
+        anyhow::bail!("Unable to detect service manager on this system");
+    }
+
+    let services = service::list_services(&sm)?;
+
+    if services.is_empty() {
+        println!("{}", "No services found".yellow());
+        return Ok(());
+    }
+
+    if config.json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "count": services.len(),
+                "services": services
+            }))?
+        );
+    } else {
+        println!("{} {} service(s):\n", "✓".green().bold(), services.len());
+
+        println!("{:<40} {}", "SERVICE".cyan().bold(), "STATUS".cyan().bold());
+        println!("{}", "=".repeat(60).bright_black());
+
+        for svc in services.iter().take(50) {
+            let status_str = match svc.status {
+                service::ServiceStatus::Running => "running".green(),
+                service::ServiceStatus::Stopped => "stopped".yellow(),
+                service::ServiceStatus::Failed => "failed".red(),
+                service::ServiceStatus::Unknown => "unknown".bright_black(),
+            };
+
+            println!("  {:<38} {}", svc.name.bright_white(), status_str);
+        }
+
+        if services.len() > 50 {
+            println!(
+                "\n{} Showing 50 of {} services",
+                "ℹ️".blue(),
+                services.len()
+            );
+        }
+    }
+
+    Ok(())
+}
+
+// System information function
+fn sys_info(config: &CliConfig) -> Result<()> {
+    println!("{} Gathering system information...\n", "💻".bold());
+
+    let info = sysinfo::gather_system_info()?;
+
+    if config.json_output {
+        println!("{}", serde_json::to_string_pretty(&info)?);
+    } else {
+        // OS Information
+        println!("{}", "═".repeat(60).bright_blue());
+        println!("{}", "OPERATING SYSTEM".cyan().bold());
+        println!("{}", "═".repeat(60).bright_blue());
+        println!("{:<20} {}", "Name:".cyan(), info.os.name.bright_white());
+        println!(
+            "{:<20} {}",
+            "Version:".cyan(),
+            info.os.version.bright_white()
+        );
+        println!("{:<20} {}", "Kernel:".cyan(), info.os.kernel.bright_white());
+        println!(
+            "{:<20} {}",
+            "Architecture:".cyan(),
+            info.os.architecture.bright_white()
+        );
+        println!(
+            "{:<20} {}",
+            "Hostname:".cyan(),
+            info.hostname.bright_white()
+        );
+        if let Some(uptime) = info.uptime {
+            println!("{:<20} {}", "Uptime:".cyan(), uptime.bright_white());
+        }
+
+        // CPU Information
+        println!("\n{}", "═".repeat(60).bright_blue());
+        println!("{}", "CPU".cyan().bold());
+        println!("{}", "═".repeat(60).bright_blue());
+        println!("{:<20} {}", "Model:".cyan(), info.cpu.model.bright_white());
+        println!(
+            "{:<20} {}",
+            "Physical Cores:".cyan(),
+            info.cpu.cores.to_string().bright_white()
+        );
+        if let Some(threads) = info.cpu.threads {
+            println!(
+                "{:<20} {}",
+                "Logical Cores:".cyan(),
+                threads.to_string().bright_white()
+            );
+        }
+        if let Some(freq) = info.cpu.frequency {
+            println!("{:<20} {}", "Frequency:".cyan(), freq.bright_white());
+        }
+
+        // Memory Information
+        println!("\n{}", "═".repeat(60).bright_blue());
+        println!("{}", "MEMORY".cyan().bold());
+        println!("{}", "═".repeat(60).bright_blue());
+        println!(
+            "{:<20} {}",
+            "Total:".cyan(),
+            info.memory.total.bright_white()
+        );
+        println!("{:<20} {}", "Used:".cyan(), info.memory.used.bright_white());
+        println!(
+            "{:<20} {}",
+            "Available:".cyan(),
+            info.memory.available.bright_white()
+        );
+        println!("{:<20} {:.1}%", "Usage:".cyan(), info.memory.percent_used);
+
+        // Disk Information
+        if !info.disks.is_empty() {
+            println!("\n{}", "═".repeat(60).bright_blue());
+            println!("{}", "DISKS".cyan().bold());
+            println!("{}", "═".repeat(60).bright_blue());
+
+            for disk in &info.disks {
+                println!("\n{} {}", "Mount:".cyan(), disk.mount_point.bright_white());
+                println!(
+                    "  {:<18} {}",
+                    "Device:".truecolor(150, 150, 150),
+                    disk.device
+                );
+                println!(
+                    "  {:<18} {}",
+                    "Filesystem:".truecolor(150, 150, 150),
+                    disk.filesystem
+                );
+                println!("  {:<18} {}", "Total:".truecolor(150, 150, 150), disk.total);
+                println!("  {:<18} {}", "Used:".truecolor(150, 150, 150), disk.used);
+                println!(
+                    "  {:<18} {}",
+                    "Available:".truecolor(150, 150, 150),
+                    disk.available
+                );
+
+                let usage_color = if disk.percent_used >= 90.0 {
+                    disk.percent_used.to_string().red()
+                } else if disk.percent_used >= 75.0 {
+                    disk.percent_used.to_string().yellow()
+                } else {
+                    disk.percent_used.to_string().green()
+                };
+                println!(
+                    "  {:<18} {}%",
+                    "Usage:".truecolor(150, 150, 150),
+                    usage_color
+                );
+            }
+        }
+
+        // Network Information
+        if !info.network.interfaces.is_empty() {
+            println!("\n{}", "═".repeat(60).bright_blue());
+            println!("{}", "NETWORK".cyan().bold());
+            println!("{}", "═".repeat(60).bright_blue());
+
+            for iface in &info.network.interfaces {
+                // Skip loopback and other virtual interfaces for cleaner output
+                if iface.name.starts_with("lo") || iface.ip_address.is_none() {
+                    continue;
+                }
+
+                println!("\n{} {}", "Interface:".cyan(), iface.name.bright_white());
+                if let Some(ref ip) = iface.ip_address {
+                    println!("  {:<18} {}", "IP Address:".truecolor(150, 150, 150), ip);
+                }
+                if let Some(ref mac) = iface.mac_address {
+                    println!("  {:<18} {}", "MAC Address:".truecolor(150, 150, 150), mac);
+                }
+            }
+        }
+
+        println!("\n{}", "═".repeat(60).bright_blue());
+    }
+
+    Ok(())
+}
+
+// Package management functions
+fn pkg_install(packages: &[String], config: &CliConfig) -> Result<()> {
+    println!("{} Installing packages...\n", "📦".bold());
+
+    let pm = package::detect_package_manager()?;
+    println!(
+        "{} {}",
+        "Detected package manager:".cyan(),
+        pm.name().bright_white()
+    );
+
+    if pm == package::PackageManager::Unknown {
+        anyhow::bail!("Unable to detect package manager on this system");
+    }
+
+    println!();
+    package::install_packages(packages, &pm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!(
+            "\n{} Successfully installed {} package(s)",
+            "✓".green().bold(),
+            packages.len()
+        );
+    }
+
+    Ok(())
+}
+
+fn pkg_remove(packages: &[String], config: &CliConfig) -> Result<()> {
+    println!("{} Removing packages...\n", "📦".bold());
+
+    let pm = package::detect_package_manager()?;
+    println!(
+        "{} {}",
+        "Detected package manager:".cyan(),
+        pm.name().bright_white()
+    );
+
+    if pm == package::PackageManager::Unknown {
+        anyhow::bail!("Unable to detect package manager on this system");
+    }
+
+    println!();
+    package::remove_packages(packages, &pm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!(
+            "\n{} Successfully removed {} package(s)",
+            "✓".green().bold(),
+            packages.len()
+        );
+    }
+
+    Ok(())
+}
+
+fn pkg_update(config: &CliConfig) -> Result<()> {
+    println!("{} Updating package cache...\n", "🔄".bold());
+
+    let pm = package::detect_package_manager()?;
+    println!(
+        "{} {}",
+        "Detected package manager:".cyan(),
+        pm.name().bright_white()
+    );
+
+    if pm == package::PackageManager::Unknown {
+        anyhow::bail!("Unable to detect package manager on this system");
+    }
+
+    println!();
+    package::update_cache(&pm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!("\n{} Package cache updated", "✓".green().bold());
+    }
+
+    Ok(())
+}
+
+fn pkg_upgrade(config: &CliConfig) -> Result<()> {
+    println!("{} Upgrading all packages...\n", "⬆️".bold());
+
+    let pm = package::detect_package_manager()?;
+    println!(
+        "{} {}",
+        "Detected package manager:".cyan(),
+        pm.name().bright_white()
+    );
+
+    if pm == package::PackageManager::Unknown {
+        anyhow::bail!("Unable to detect package manager on this system");
+    }
+
+    println!();
+    package::upgrade_packages(&pm, config.dry_run, config.verbose)?;
+
+    if !config.dry_run {
+        println!("\n{} All packages upgraded", "✓".green().bold());
+    }
+
+    Ok(())
+}
+
+fn pkg_search(query: &str, config: &CliConfig) -> Result<()> {
+    println!(
+        "{} Searching for packages matching: {}\n",
+        "🔍".bold(),
+        query.bright_white()
+    );
+
+    let pm = package::detect_package_manager()?;
+
+    if pm == package::PackageManager::Unknown {
+        anyhow::bail!("Unable to detect package manager on this system");
+    }
+
+    let packages = package::search_packages(query, &pm)?;
+
+    if packages.is_empty() {
+        println!("{}", "No packages found".yellow());
+        return Ok(());
+    }
+
+    if config.json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "query": query,
+                "count": packages.len(),
+                "packages": packages
+            }))?
+        );
+    } else {
+        println!(
+            "{} Found {} package(s):\n",
+            "✓".green().bold(),
+            packages.len()
+        );
+
+        for pkg in packages.iter().take(50) {
+            // Limit to first 50 results
+            print!("  {} {}", "•".blue(), pkg.name.bright_white());
+            if let Some(version) = &pkg.version {
+                print!(" {}", version.truecolor(150, 150, 150));
+            }
+            if let Some(description) = &pkg.description {
+                print!(" - {}", description.truecolor(180, 180, 180));
+            }
+            println!();
+        }
+
+        if packages.len() > 50 {
+            println!("\n{} Showing 50 of {} results", "ℹ️".blue(), packages.len());
+        }
+    }
+
+    Ok(())
+}
+
+fn pkg_list(config: &CliConfig) -> Result<()> {
+    println!("{} Listing installed packages...\n", "📋".bold());
+
+    let pm = package::detect_package_manager()?;
+
+    if pm == package::PackageManager::Unknown {
+        anyhow::bail!("Unable to detect package manager on this system");
+    }
+
+    let packages = package::list_installed(&pm)?;
+
+    if packages.is_empty() {
+        println!("{}", "No packages installed".yellow());
+        return Ok(());
+    }
+
+    if config.json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "count": packages.len(),
+                "packages": packages
+            }))?
+        );
+    } else {
+        println!(
+            "{} {} installed package(s):\n",
+            "✓".green().bold(),
+            packages.len()
+        );
+
+        println!(
+            "{:<40} {}",
+            "PACKAGE".cyan().bold(),
+            "VERSION".cyan().bold()
+        );
+        println!("{}", "=".repeat(60).bright_black());
+
+        for pkg in &packages {
+            print!("  {:<38}", pkg.name.bright_white());
+            if let Some(version) = &pkg.version {
+                print!(" {}", version.truecolor(150, 150, 150));
+            }
+            println!();
+        }
+
+        println!("\n{} Total: {} packages", "📦".bold(), packages.len());
+    }
+
+    Ok(())
+}
+
+fn pkg_info(package_name: &str, config: &CliConfig) -> Result<()> {
+    println!(
+        "{} Checking package: {}\n",
+        "ℹ️".bold(),
+        package_name.bright_white()
+    );
+
+    let pm = package::detect_package_manager()?;
+
+    if pm == package::PackageManager::Unknown {
+        anyhow::bail!("Unable to detect package manager on this system");
+    }
+
+    let is_installed = package::is_package_installed(package_name, &pm)?;
+
+    if config.json_output {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "package": package_name,
+                "installed": is_installed,
+                "package_manager": pm.name()
+            }))?
+        );
+    } else {
+        println!(
+            "{} {}",
+            "Package:".cyan().bold(),
+            package_name.bright_white()
+        );
+        println!("{} {}", "Package Manager:".cyan(), pm.name().bright_white());
+
+        if is_installed {
+            println!("{} {}", "Status:".cyan(), "Installed ✓".green().bold());
+        } else {
+            println!("{} {}", "Status:".cyan(), "Not installed".yellow());
+        }
+    }
+
+    Ok(())
+}
+
 fn generate_fstab(output_file: Option<&str>, dry_run: bool) -> Result<()> {
     println!("{} Generating fstab entries...\n", "🔧".bold());
 
@@ -1539,6 +2313,22 @@ fn generate_fstab(output_file: Option<&str>, dry_run: bool) -> Result<()> {
                 print!("{}", fstab_content);
                 println!("{}", "=".repeat(100).bright_black());
             } else {
+                // Create backup before writing if file exists
+                let path = Path::new(file_path);
+                if path.exists() {
+                    println!("{} Creating backup before modification...", "💾".blue());
+                    let backup_metadata = backup::create_backup(
+                        file_path,
+                        backup::BackupReason::PreFstabModification,
+                        false,
+                    )?;
+                    println!(
+                        "{} Backup created: {}",
+                        "✓".green(),
+                        backup_metadata.backup_path.bright_white()
+                    );
+                }
+
                 fs::write(file_path, &fstab_content)
                     .with_context(|| format!("Failed to write to {}", file_path))?;
                 println!(
@@ -1583,29 +2373,49 @@ fn generate_fstab(output_file: Option<&str>, dry_run: bool) -> Result<()> {
     Ok(())
 }
 
-fn backup_file(file_path: &str, dry_run: bool) -> Result<PathBuf> {
-    let source = Path::new(file_path);
-    if !source.exists() {
-        anyhow::bail!("Source file does not exist: {}", file_path);
+// Backup command handlers
+fn backup_file_cmd(file_path: &str, dry_run: bool) -> Result<()> {
+    println!("{} Creating backup...\n", "💾".bold());
+
+    let metadata = backup::create_backup(file_path, backup::BackupReason::Manual, dry_run)?;
+
+    if !dry_run {
+        println!("{} Backup created successfully", "✓".green().bold());
+        backup::display_backup_info(&metadata);
     }
 
-    let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_name = format!("{}.backup.{}", file_path, timestamp);
-    let backup_path = PathBuf::from(&backup_name);
+    Ok(())
+}
 
-    if dry_run {
-        println!(
-            "{} Would create backup: {}",
-            "[DRY-RUN]".yellow().bold(),
-            backup_name.bright_white()
-        );
-    } else {
-        fs::copy(source, &backup_path)
-            .with_context(|| format!("Failed to create backup at {}", backup_name))?;
-        info!("Created backup: {}", backup_name);
+fn restore_backup_cmd(backup_path: &str, dry_run: bool, force: bool) -> Result<()> {
+    println!("{} Restoring from backup...\n", "♻️".bold());
+
+    backup::restore_backup(backup_path, dry_run, force)?;
+
+    if !dry_run {
+        println!("\n{} Backup restored successfully", "✓".green().bold());
     }
 
-    Ok(backup_path)
+    Ok(())
+}
+
+fn list_backups_cmd(file_path: &str) -> Result<()> {
+    println!(
+        "{} Listing backups for: {}\n",
+        "📋".bold(),
+        file_path.bright_white()
+    );
+
+    let backups = backup::list_backups(file_path)?;
+    backup::display_backups(&backups);
+
+    Ok(())
+}
+
+fn backup_stats_cmd() -> Result<()> {
+    let stats = backup::get_backup_stats()?;
+    stats.display();
+    Ok(())
 }
 
 fn print_help() {
@@ -1678,8 +2488,20 @@ fn print_help() {
         "generate [file]".bright_yellow()
     );
     println!(
-        "    {}      Create timestamped backup of fstab",
+        "    {}        Create verified backup with metadata",
         "backup [file]".bright_yellow()
+    );
+    println!(
+        "    {}      Restore from a backup (use --force to override)",
+        "restore <backup>".bright_yellow()
+    );
+    println!(
+        "    {}  List all backups for a file",
+        "list-backups <file>".bright_yellow()
+    );
+    println!(
+        "    {}   Show backup statistics and disk usage",
+        "backup-stats".bright_yellow()
     );
     println!(
         "    {}  Compare two fstab files with colored diff",
@@ -1736,6 +2558,84 @@ fn print_help() {
     );
 
     println!(
+        "\n{} {}",
+        "SERVICE".cyan().bold(),
+        "MANAGEMENT:".cyan().bold()
+    );
+    println!(
+        "    {}       Start a service",
+        "service start <service>".bright_yellow()
+    );
+    println!(
+        "    {}        Stop a service",
+        "service stop <service>".bright_yellow()
+    );
+    println!(
+        "    {}     Restart a service",
+        "service restart <service>".bright_yellow()
+    );
+    println!(
+        "    {}      Enable a service to start on boot",
+        "service enable <service>".bright_yellow()
+    );
+    println!(
+        "    {}     Disable a service from starting on boot",
+        "service disable <service>".bright_yellow()
+    );
+    println!(
+        "    {}      Get service status",
+        "service status <service>".bright_yellow()
+    );
+    println!(
+        "    {}       List all services (supports --json)",
+        "service list".bright_yellow()
+    );
+
+    println!(
+        "\n{} {}",
+        "SYSTEM".cyan().bold(),
+        "INFORMATION:".cyan().bold()
+    );
+    println!(
+        "    {}         Show comprehensive system information (supports --json)",
+        "info".bright_yellow()
+    );
+
+    println!(
+        "\n{} {}",
+        "PACKAGE".cyan().bold(),
+        "MANAGEMENT:".cyan().bold()
+    );
+    println!(
+        "    {}       Install packages (supports --dry-run)",
+        "pkg install <pkg1> [pkg2...]".bright_yellow()
+    );
+    println!(
+        "    {}        Remove packages",
+        "pkg remove <pkg1> [pkg2...]".bright_yellow()
+    );
+    println!(
+        "    {}       Update package cache/repositories",
+        "pkg update".bright_yellow()
+    );
+    println!(
+        "    {}       Upgrade all installed packages",
+        "pkg upgrade".bright_yellow()
+    );
+    println!(
+        "    {}       Search for packages",
+        "pkg search <query>".bright_yellow()
+    );
+    println!(
+        "    {}       List all installed packages (supports --json)",
+        "pkg list".bright_yellow()
+    );
+    println!(
+        "    {}       Check if a package is installed",
+        "pkg info <package>".bright_yellow()
+    );
+
+    println!(
         "\n    {}         Show this help message",
         "help".bright_yellow()
     );
@@ -1774,6 +2674,22 @@ fn print_help() {
         "#".bright_black()
     );
     println!(
+        "    catdog backup /etc/fstab     {} Create verified backup with checksum",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog list-backups /etc/fstab {} Show all backups for a file",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog restore <backup_path> {} Restore from a backup",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog backup-stats          {} Show backup storage statistics",
+        "#".bright_black()
+    );
+    println!(
         "    catdog check               {} Run health checks once",
         "#".bright_black()
     );
@@ -1799,6 +2715,38 @@ fn print_help() {
     );
     println!(
         "    catdog quiet <id>          {} Quiet the dog (resolve bark)",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog pkg install nginx   {} Install nginx package",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog pkg search docker   {} Search for docker packages",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog pkg list            {} List all installed packages",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog --json pkg list     {} Get installed packages as JSON",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog service status ssh  {} Check SSH service status",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog service restart nginx {} Restart nginx service",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog info                {} Show complete system information",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog info --json         {} Get system info as JSON",
         "#".bright_black()
     );
 }
