@@ -170,6 +170,8 @@ fn run() -> Result<()> {
             list_backups_cmd(&args[2])
         }
         "backup-stats" => backup_stats_cmd(),
+        "backup-health" => backup_health_cmd(),
+        "backup-drill" => backup_drill_cmd(),
         "suggest" => {
             let device_filter = if args.len() >= 3 {
                 Some(args[2].as_str())
@@ -2418,6 +2420,75 @@ fn backup_stats_cmd() -> Result<()> {
     Ok(())
 }
 
+fn backup_health_cmd() -> Result<()> {
+    println!("{} Running backup health check...\n", "🏥".bold());
+
+    let health = backup::run_health_check()?;
+    health.display();
+
+    // Emit event
+    if health.is_healthy() {
+        let _ = backup::emit_backup_event(
+            backup::BackupEventType::HealthCheckPassed,
+            "all",
+            &format!("{}/{} backups healthy", health.healthy_backups, health.total_backups),
+            backup::EventSeverity::Info,
+        );
+    } else {
+        let _ = backup::emit_backup_event(
+            backup::BackupEventType::HealthCheckFailed,
+            "all",
+            &format!("{} corrupted, {} errors", health.corrupted_backups.len(), health.errors.len()),
+            backup::EventSeverity::Critical,
+        );
+    }
+
+    // Exit with error code if unhealthy
+    if !health.is_healthy() {
+        process::exit(1);
+    }
+
+    Ok(())
+}
+
+fn backup_drill_cmd() -> Result<()> {
+    println!("{} Running backup restoration drill...\n", "🎯".bold());
+    println!("{} This will verify all backups can be restored (read-only test)\n", "ℹ️".blue());
+
+    let drill = backup::run_restoration_drill()?;
+    drill.display();
+
+    // Emit event
+    let success_rate = if drill.total_tested > 0 {
+        (drill.successful as f64 / drill.total_tested as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    if success_rate == 100.0 {
+        let _ = backup::emit_backup_event(
+            backup::BackupEventType::DrillPassed,
+            "all",
+            &format!("{}/{} backups verified in {} ms", drill.successful, drill.total_tested, drill.duration_ms),
+            backup::EventSeverity::Info,
+        );
+    } else {
+        let _ = backup::emit_backup_event(
+            backup::BackupEventType::DrillFailed,
+            "all",
+            &format!("{} of {} backups failed verification", drill.failed.len(), drill.total_tested),
+            backup::EventSeverity::Warning,
+        );
+    }
+
+    // Exit with error code if failures
+    if !drill.failed.is_empty() {
+        process::exit(1);
+    }
+
+    Ok(())
+}
+
 fn print_help() {
     println!(
         "{} {} A professional filesystem management tool",
@@ -2502,6 +2573,14 @@ fn print_help() {
     println!(
         "    {}   Show backup statistics and disk usage",
         "backup-stats".bright_yellow()
+    );
+    println!(
+        "    {}  Run backup health check and verification",
+        "backup-health".bright_yellow()
+    );
+    println!(
+        "    {}   Test backup restoration (dry-run drill)",
+        "backup-drill".bright_yellow()
     );
     println!(
         "    {}  Compare two fstab files with colored diff",
@@ -2687,6 +2766,14 @@ fn print_help() {
     );
     println!(
         "    catdog backup-stats          {} Show backup storage statistics",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog backup-health         {} Verify all backups are healthy",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog backup-drill          {} Test restoration of all backups",
         "#".bright_black()
     );
     println!(

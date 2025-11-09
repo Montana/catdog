@@ -146,6 +146,14 @@ pub fn create_backup(
         reason.description()
     );
 
+    // Emit backup event
+    let _ = emit_backup_event(
+        BackupEventType::BackupCreated,
+        file_path,
+        &format!("Backup created: {} bytes, checksum {}", size_bytes, &checksum[..16]),
+        EventSeverity::Info,
+    );
+
     // Cleanup old backups
     cleanup_old_backups(&backup_dir)?;
 
@@ -357,6 +365,14 @@ pub fn restore_backup(backup_path: &str, dry_run: bool, force: bool) -> Result<(
     verify_backup(backup, original)?;
 
     info!("Successfully restored: {}", metadata.original_path);
+
+    // Emit restore event
+    let _ = emit_backup_event(
+        BackupEventType::BackupRestored,
+        &metadata.original_path,
+        &format!("Restored from backup: {}", backup_path),
+        EventSeverity::Info,
+    );
 
     Ok(())
 }
