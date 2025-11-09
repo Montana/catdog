@@ -2,19 +2,12 @@
 
 # catdog
 
+<img width="1563" height="1563" alt="Quant Point (11)" src="https://github.com/user-attachments/assets/7e376d8e-dc21-435d-897a-a58457d10d66" />
+
 **A production-grade command-line tool for system administration, backup management, and filesystem operations.**
 
 catdog is a professional filesystem management tool with enterprise backup capabilities, monitoring, package management, and cross-platform service control—all in a single Rust binary.
 
-## 🎯 Why catdog?
-
-- **Production-Ready Backups**: SHA-256 verified backups with health monitoring and restoration drills
-- **Zero Dependencies**: Single binary, no Python, no agents, instant execution
-- **Cross-Platform**: Works on Linux (all major distros) and macOS
-- **Unified Interface**: One tool for packages, services, backups, and filesystems
-- **Automation-Friendly**: JSON output, dry-run mode, exit codes for CI/CD
-
-## Features
 
 ### 🔒 Enterprise Backup System (NEW!)
 - **SHA-256 Verification** - Every backup checksummed and verified
@@ -53,6 +46,9 @@ catdog is a professional filesystem management tool with enterprise backup capab
 - **Build a library** of fstab configurations for searching and reference
 - **Search** across multiple system configurations
 - **Track patterns** and best practices
+
+<img width="1903" height="1263" alt="catdog_health_monitor_lavender_sky" src="https://github.com/user-attachments/assets/e0baf53d-1de1-4a2f-baee-653945ad5e06" />
+
 
 ### 💻 System Information
 - **Comprehensive hardware and OS details** with JSON output
@@ -234,6 +230,8 @@ When catdog detects problems, it barks! 🐕
 | `catdog corpus ingest <file>` | Add an fstab file to your configuration library |
 | `catdog corpus search <query>` | Search stored configurations by filesystem, device, or options |
 | `catdog corpus stats` | Show statistics about stored configurations |
+
+<img width="1903" height="1263" alt="catdog_predicted_time" src="https://github.com/user-attachments/assets/0257180f-e361-4519-8b6a-3ad97b858723" />
 
 ### System Information
 
