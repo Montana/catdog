@@ -358,12 +358,9 @@ You can safely delete this directory to clear your library.
 
 MIT OR Apache-2.0
 
-## Contributing
 
 PRs welcome! Please:
 - Run `cargo fmt` and `cargo clippy`
-- Add tests for new features
-- Keep the code simple and readable
 
 ---
 

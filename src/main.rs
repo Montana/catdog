@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use colored::*;
-use log::{debug, error, info, warn};
+use log::info;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
@@ -8,10 +8,15 @@ use std::path::{Path, PathBuf};
 use std::process::{self, Command};
 
 mod alerts;
+mod config;
 mod corpus;
+mod diff;
+mod error;
 mod monitor;
 
 use alerts::{display_alert_detail, display_alerts, AlertManager, AlertStatus};
+use config::Config;
+use error::{to_user_error, UserError};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
@@ -22,6 +27,7 @@ struct CliConfig {
     no_color: bool,
     verbose: bool,
     dry_run: bool,
+    app_config: Config,
 }
 
 #[derive(Debug, Clone)]
@@ -61,12 +67,21 @@ fn main() {
     // Initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
 
+    // Run main logic and handle errors nicely
+    if let Err(e) = run() {
+        let user_error = to_user_error(e);
+        user_error.display();
+        process::exit(user_error.exit_code());
+    }
+}
+
+fn run() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
     // Handle version early
     if args.len() >= 2 && (args[1] == "--version" || args[1] == "-V" || args[1] == "version") {
         print_version();
-        return;
+        return Ok(());
     }
 
     if args.len() < 2 {
@@ -74,17 +89,29 @@ fn main() {
         process::exit(1);
     }
 
+    // Load application config
+    let app_config = Config::load().context("Failed to load configuration")?;
+
     // Parse global flags
-    let mut config = CliConfig {
+    let config = CliConfig {
         json_output: args.contains(&"--json".to_string()),
         no_color: args.contains(&"--no-color".to_string()) || env::var("NO_COLOR").is_ok(),
         verbose: args.contains(&"-v".to_string()) || args.contains(&"--verbose".to_string()),
         dry_run: args.contains(&"--dry-run".to_string()),
+        app_config,
     };
 
     // Disable colors if requested
     if config.no_color {
         colored::control::set_override(false);
+    }
+
+    // Show dry-run notice
+    if config.dry_run {
+        println!(
+            "{} Dry-run mode enabled - no changes will be made\n",
+            "ℹ️".blue()
+        );
     }
 
     // Filter out flags to get the actual command and args
@@ -118,9 +145,10 @@ fn main() {
         "discover" => discover_devices(&config),
         "backup" => {
             if non_flag_args.len() < 3 {
-                backup_file("/etc/fstab").map(|path| println!("Backup created: {}", path.display()))
+                backup_file("/etc/fstab", config.dry_run)
+                    .map(|path| println!("Backup created: {}", path.display()))
             } else {
-                backup_file(&non_flag_args[2])
+                backup_file(&non_flag_args[2], config.dry_run)
                     .map(|path| println!("Backup created: {}", path.display()))
             }
         }
@@ -138,7 +166,7 @@ fn main() {
             } else {
                 None
             };
-            generate_fstab(output_file)
+            generate_fstab(output_file, config.dry_run)
         }
         // Bark (alert) commands
         "monitor" => {
@@ -224,6 +252,21 @@ fn main() {
                 }
             }
         }
+        "diff" => {
+            if args.len() < 4 {
+                eprintln!("{}", "Usage: catdog diff <file1> <file2>".red());
+                eprintln!(
+                    "       catdog diff --current <file>   {}",
+                    "(compare with /etc/fstab)".truecolor(150, 150, 150)
+                );
+                process::exit(1);
+            }
+            if args[2] == "--current" {
+                diff::compare_with_current(&args[3])
+            } else {
+                diff::diff_files(&args[2], &args[3])
+            }
+        }
         "version" | "--version" | "-V" => {
             print_version();
             Ok(())
@@ -239,10 +282,7 @@ fn main() {
         }
     };
 
-    if let Err(e) = result {
-        eprintln!("{} {:#}", "Error:".red().bold(), e);
-        process::exit(1);
-    }
+    result
 }
 
 fn cat_fstab() -> Result<()> {
@@ -1390,7 +1430,7 @@ fn corpus_stats() -> Result<()> {
     Ok(())
 }
 
-fn generate_fstab(output_file: Option<&str>) -> Result<()> {
+fn generate_fstab(output_file: Option<&str>, dry_run: bool) -> Result<()> {
     println!("{} Generating fstab entries...\n", "🔧".bold());
 
     let devices = discover_block_devices()?;
@@ -1488,13 +1528,25 @@ fn generate_fstab(output_file: Option<&str>) -> Result<()> {
     // Output the result
     match output_file {
         Some(file_path) => {
-            fs::write(file_path, &fstab_content)
-                .with_context(|| format!("Failed to write to {}", file_path))?;
-            println!(
-                "{} Generated fstab written to: {}",
-                "✓".green().bold(),
-                file_path.bright_white()
-            );
+            if dry_run {
+                println!(
+                    "{} Would write fstab to: {}",
+                    "[DRY-RUN]".yellow().bold(),
+                    file_path.bright_white()
+                );
+                println!("\n{}", "Preview of content:".cyan().bold());
+                println!("{}", "=".repeat(100).bright_black());
+                print!("{}", fstab_content);
+                println!("{}", "=".repeat(100).bright_black());
+            } else {
+                fs::write(file_path, &fstab_content)
+                    .with_context(|| format!("Failed to write to {}", file_path))?;
+                println!(
+                    "{} Generated fstab written to: {}",
+                    "✓".green().bold(),
+                    file_path.bright_white()
+                );
+            }
             println!("\n{}", "Next steps:".cyan().bold());
             println!(
                 "  1. Review the file: {}",
@@ -1531,7 +1583,7 @@ fn generate_fstab(output_file: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn backup_file(file_path: &str) -> Result<PathBuf> {
+fn backup_file(file_path: &str, dry_run: bool) -> Result<PathBuf> {
     let source = Path::new(file_path);
     if !source.exists() {
         anyhow::bail!("Source file does not exist: {}", file_path);
@@ -1541,10 +1593,18 @@ fn backup_file(file_path: &str) -> Result<PathBuf> {
     let backup_name = format!("{}.backup.{}", file_path, timestamp);
     let backup_path = PathBuf::from(&backup_name);
 
-    fs::copy(source, &backup_path)
-        .with_context(|| format!("Failed to create backup at {}", backup_name))?;
+    if dry_run {
+        println!(
+            "{} Would create backup: {}",
+            "[DRY-RUN]".yellow().bold(),
+            backup_name.bright_white()
+        );
+    } else {
+        fs::copy(source, &backup_path)
+            .with_context(|| format!("Failed to create backup at {}", backup_name))?;
+        info!("Created backup: {}", backup_name);
+    }
 
-    info!("Created backup: {}", backup_name);
     Ok(backup_path)
 }
 
@@ -1620,6 +1680,10 @@ fn print_help() {
     println!(
         "    {}      Create timestamped backup of fstab",
         "backup [file]".bright_yellow()
+    );
+    println!(
+        "    {}  Compare two fstab files with colored diff",
+        "diff <file1> <file2>".bright_yellow()
     );
 
     println!(
@@ -1703,6 +1767,10 @@ fn print_help() {
     );
     println!(
         "    catdog generate fstab.new  {} Generate complete fstab file",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog diff fstab.old fstab.new {} Compare two fstab files",
         "#".bright_black()
     );
     println!(
