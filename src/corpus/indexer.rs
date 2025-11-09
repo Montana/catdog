@@ -5,8 +5,7 @@
 /// - Inverted index with positional information
 /// - B+ tree for range queries
 /// - Bloom filters for membership testing
-
-use super::{Document, CorpusError};
+use super::{CorpusError, Document};
 use std::collections::HashMap;
 
 /// Multi-level indexing structure
@@ -77,7 +76,8 @@ impl CorpusIndex {
             .collect();
 
         for (i, table) in self.lsh_tables.iter_mut().enumerate() {
-            table.entry(hashes[i])
+            table
+                .entry(hashes[i])
                 .or_insert_with(Vec::new)
                 .push(doc_id.to_string());
         }
@@ -89,9 +89,7 @@ impl CorpusIndex {
     }
 
     fn tokenize(&self, text: &str) -> Vec<String> {
-        text.split_whitespace()
-            .map(|s| s.to_lowercase())
-            .collect()
+        text.split_whitespace().map(|s| s.to_lowercase()).collect()
     }
 }
 
@@ -113,8 +111,8 @@ impl BloomFilter {
     /// - m = -n ln(p) / (ln 2)²
     /// - k = (m/n) ln 2
     pub fn new(expected_elements: usize, false_positive_rate: f64) -> Self {
-        let size = (-(expected_elements as f64) * false_positive_rate.ln()
-                    / (2_f64.ln().powi(2))) as usize;
+        let size = (-(expected_elements as f64) * false_positive_rate.ln() / (2_f64.ln().powi(2)))
+            as usize;
         let num_hashes = ((size as f64 / expected_elements as f64) * 2_f64.ln()) as usize;
 
         Self {

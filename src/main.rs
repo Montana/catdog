@@ -1,17 +1,17 @@
 use anyhow::{Context, Result};
 use colored::*;
+use log::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
-use log::{info, warn, error, debug};
 
 mod alerts;
-mod monitor;
 mod corpus;
+mod monitor;
 
-use alerts::{AlertManager, AlertStatus, display_alerts, display_alert_detail};
+use alerts::{display_alert_detail, display_alerts, AlertManager, AlertStatus};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const AUTHORS: &str = env!("CARGO_PKG_AUTHORS");
@@ -88,7 +88,8 @@ fn main() {
     }
 
     // Filter out flags to get the actual command and args
-    let non_flag_args: Vec<String> = args.iter()
+    let non_flag_args: Vec<String> = args
+        .iter()
         .filter(|a| !a.starts_with("--") && !a.starts_with("-v") && !a.starts_with("-V"))
         .map(|s| s.clone())
         .collect();
@@ -117,8 +118,7 @@ fn main() {
         "discover" => discover_devices(&config),
         "backup" => {
             if non_flag_args.len() < 3 {
-                backup_file("/etc/fstab")
-                    .map(|path| println!("Backup created: {}", path.display()))
+                backup_file("/etc/fstab").map(|path| println!("Backup created: {}", path.display()))
             } else {
                 backup_file(&non_flag_args[2])
                     .map(|path| println!("Backup created: {}", path.display()))
@@ -216,7 +216,10 @@ fn main() {
                 }
                 "stats" => corpus_stats(),
                 _ => {
-                    eprintln!("{}", "Unknown corpus command. Try: ingest, search, stats".red());
+                    eprintln!(
+                        "{}",
+                        "Unknown corpus command. Try: ingest, search, stats".red()
+                    );
                     process::exit(1);
                 }
             }
@@ -244,8 +247,8 @@ fn main() {
 
 fn cat_fstab() -> Result<()> {
     let fstab_path = "/etc/fstab";
-    let contents = fs::read_to_string(fstab_path)
-        .with_context(|| format!("Failed to read {}", fstab_path))?;
+    let contents =
+        fs::read_to_string(fstab_path).with_context(|| format!("Failed to read {}", fstab_path))?;
     print!("{}", contents);
     Ok(())
 }
@@ -260,13 +263,15 @@ fn dog_fstab() -> Result<()> {
         return Ok(());
     }
 
-    println!("{:<30} {:<20} {:<10} {:<30} {} {}",
-             "DEVICE".cyan().bold(),
-             "MOUNT POINT".cyan().bold(),
-             "TYPE".cyan().bold(),
-             "OPTIONS".cyan().bold(),
-             "DUMP".cyan().bold(),
-             "PASS".cyan().bold());
+    println!(
+        "{:<30} {:<20} {:<10} {:<30} {} {}",
+        "DEVICE".cyan().bold(),
+        "MOUNT POINT".cyan().bold(),
+        "TYPE".cyan().bold(),
+        "OPTIONS".cyan().bold(),
+        "DUMP".cyan().bold(),
+        "PASS".cyan().bold()
+    );
     println!("{}", "=".repeat(120).bright_black());
 
     for entry in &entries {
@@ -284,18 +289,22 @@ fn dog_fstab() -> Result<()> {
             _ => entry.mount_point.white(),
         };
 
-        println!("{:<30} {:<20} {:<10} {:<30} {:<4} {}",
-                 device.to_string(),
-                 mount_color.to_string(),
-                 entry.fs_type,
-                 entry.options.truecolor(180, 180, 180).to_string(),
-                 entry.dump,
-                 entry.pass);
+        println!(
+            "{:<30} {:<20} {:<10} {:<30} {:<4} {}",
+            device.to_string(),
+            mount_color.to_string(),
+            entry.fs_type,
+            entry.options.truecolor(180, 180, 180).to_string(),
+            entry.dump,
+            entry.pass
+        );
     }
 
-    println!("\n{} Good dog! Retrieved {} entries",
-             "🐕".bold(),
-             entries.len().to_string().green().bold());
+    println!(
+        "\n{} Good dog! Retrieved {} entries",
+        "🐕".bold(),
+        entries.len().to_string().green().bold()
+    );
     Ok(())
 }
 
@@ -305,8 +314,7 @@ fn parse_fstab() -> Result<Vec<FstabEntry>> {
 }
 
 fn parse_fstab_from_path(path: &str) -> Result<Vec<FstabEntry>> {
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path))?;
+    let contents = fs::read_to_string(path).with_context(|| format!("Failed to read {}", path))?;
 
     let mut entries = Vec::new();
 
@@ -320,10 +328,12 @@ fn parse_fstab_from_path(path: &str) -> Result<Vec<FstabEntry>> {
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
 
         if parts.len() < 6 {
-            eprintln!("{} Line {}: Expected 6 fields, found {} - skipping",
-                     "Warning:".yellow(),
-                     line_num + 1,
-                     parts.len());
+            eprintln!(
+                "{} Line {}: Expected 6 fields, found {} - skipping",
+                "Warning:".yellow(),
+                line_num + 1,
+                parts.len()
+            );
             continue;
         }
 
@@ -350,11 +360,13 @@ fn list_mounts() -> Result<()> {
 
     println!("{}\n", "Mount points in /etc/fstab:".cyan().bold());
     for entry in entries {
-        println!("  {} {} {} {}",
-                 entry.device.bright_blue(),
-                 "->".bright_black(),
-                 entry.mount_point.bright_green(),
-                 format!("({})", entry.fs_type).truecolor(180, 180, 180));
+        println!(
+            "  {} {} {} {}",
+            entry.device.bright_blue(),
+            "->".bright_black(),
+            entry.mount_point.bright_green(),
+            format!("({})", entry.fs_type).truecolor(180, 180, 180)
+        );
     }
     Ok(())
 }
@@ -370,28 +382,35 @@ fn find_entry(search: &str) -> Result<()> {
     }
 
     if found.is_empty() {
-        println!("{} '{}'",
-                 "No entries found matching".yellow(),
-                 search.bright_white());
+        println!(
+            "{} '{}'",
+            "No entries found matching".yellow(),
+            search.bright_white()
+        );
         return Ok(());
     }
 
-    println!("{} {} matching entries:\n",
-             "Found".green().bold(),
-             found.len().to_string().bright_white().bold());
-    println!("{:<30} {:<20} {:<10} {:<30} {} {}",
-             "DEVICE".cyan().bold(),
-             "MOUNT POINT".cyan().bold(),
-             "TYPE".cyan().bold(),
-             "OPTIONS".cyan().bold(),
-             "DUMP".cyan().bold(),
-             "PASS".cyan().bold());
+    println!(
+        "{} {} matching entries:\n",
+        "Found".green().bold(),
+        found.len().to_string().bright_white().bold()
+    );
+    println!(
+        "{:<30} {:<20} {:<10} {:<30} {} {}",
+        "DEVICE".cyan().bold(),
+        "MOUNT POINT".cyan().bold(),
+        "TYPE".cyan().bold(),
+        "OPTIONS".cyan().bold(),
+        "DUMP".cyan().bold(),
+        "PASS".cyan().bold()
+    );
     println!("{}", "=".repeat(120).bright_black());
 
     for entry in found {
-        println!("{:<30} {:<20} {:<10} {:<30} {:<4} {}",
-                 entry.device, entry.mount_point, entry.fs_type,
-                 entry.options, entry.dump, entry.pass);
+        println!(
+            "{:<30} {:<20} {:<10} {:<30} {:<4} {}",
+            entry.device, entry.mount_point, entry.fs_type, entry.options, entry.dump, entry.pass
+        );
     }
     Ok(())
 }
@@ -405,7 +424,10 @@ fn validate_fstab() -> Result<()> {
 
     // Check if fstab is empty
     if entries.is_empty() {
-        println!("{}", "⚠️  /etc/fstab is empty or contains no valid entries".yellow());
+        println!(
+            "{}",
+            "⚠️  /etc/fstab is empty or contains no valid entries".yellow()
+        );
         return Ok(());
     }
 
@@ -414,10 +436,12 @@ fn validate_fstab() -> Result<()> {
     for (i, entry) in entries.iter().enumerate() {
         if entry.mount_point != "none" && entry.mount_point != "swap" {
             if !mount_points.insert(&entry.mount_point) {
-                println!("{} Entry {}: Duplicate mount point '{}'",
-                         "⚠️ ".yellow(),
-                         i + 1,
-                         entry.mount_point.bright_white());
+                println!(
+                    "{} Entry {}: Duplicate mount point '{}'",
+                    "⚠️ ".yellow(),
+                    i + 1,
+                    entry.mount_point.bright_white()
+                );
                 issues += 1;
             }
         }
@@ -427,65 +451,79 @@ fn validate_fstab() -> Result<()> {
     for (i, entry) in entries.iter().enumerate() {
         // Check root filesystem pass value
         if entry.mount_point == "/" && entry.pass != "1" {
-            println!("{} Entry {}: Root filesystem should have pass=1, found pass={}",
-                     "⚠️ ".yellow(),
-                     i + 1,
-                     entry.pass.bright_white());
+            println!(
+                "{} Entry {}: Root filesystem should have pass=1, found pass={}",
+                "⚠️ ".yellow(),
+                i + 1,
+                entry.pass.bright_white()
+            );
             issues += 1;
         }
 
         // Check mount point format
         if entry.mount_point != "none" && entry.mount_point != "swap" {
             if !entry.mount_point.starts_with('/') {
-                println!("{} Entry {}: Mount point '{}' doesn't start with /",
-                         "❌".red(),
-                         i + 1,
-                         entry.mount_point.bright_white());
+                println!(
+                    "{} Entry {}: Mount point '{}' doesn't start with /",
+                    "❌".red(),
+                    i + 1,
+                    entry.mount_point.bright_white()
+                );
                 issues += 1;
             }
         }
 
         // Check swap partition configuration
         if entry.fs_type == "swap" && entry.mount_point != "none" && entry.mount_point != "swap" {
-            println!("{} Entry {}: Swap partition should have mount point 'none' or 'swap'",
-                     "⚠️ ".yellow(),
-                     i + 1);
+            println!(
+                "{} Entry {}: Swap partition should have mount point 'none' or 'swap'",
+                "⚠️ ".yellow(),
+                i + 1
+            );
             issues += 1;
         }
 
         // Check for potentially dangerous options
         if entry.options.contains("noauto") && entry.mount_point == "/" {
-            println!("{} Entry {}: Root filesystem with 'noauto' option will not mount at boot!",
-                     "❌".red(),
-                     i + 1);
+            println!(
+                "{} Entry {}: Root filesystem with 'noauto' option will not mount at boot!",
+                "❌".red(),
+                i + 1
+            );
             issues += 1;
         }
 
         // Check pass value validity
         if let Err(_) = entry.pass.parse::<u32>() {
-            println!("{} Entry {}: Invalid pass value '{}' (should be 0, 1, or 2)",
-                     "❌".red(),
-                     i + 1,
-                     entry.pass.bright_white());
+            println!(
+                "{} Entry {}: Invalid pass value '{}' (should be 0, 1, or 2)",
+                "❌".red(),
+                i + 1,
+                entry.pass.bright_white()
+            );
             issues += 1;
         }
 
         // Check dump value validity
         if let Err(_) = entry.dump.parse::<u32>() {
-            println!("{} Entry {}: Invalid dump value '{}' (should be 0 or 1)",
-                     "⚠️ ".yellow(),
-                     i + 1,
-                     entry.dump.bright_white());
+            println!(
+                "{} Entry {}: Invalid dump value '{}' (should be 0 or 1)",
+                "⚠️ ".yellow(),
+                i + 1,
+                entry.dump.bright_white()
+            );
             warnings += 1;
         }
 
         // Warn about missing mount points
         if entry.mount_point != "none" && entry.mount_point != "swap" {
             if !Path::new(&entry.mount_point).exists() {
-                println!("{} Entry {}: Mount point directory '{}' does not exist",
-                         "ℹ️ ".blue(),
-                         i + 1,
-                         entry.mount_point.bright_white());
+                println!(
+                    "{} Entry {}: Mount point directory '{}' does not exist",
+                    "ℹ️ ".blue(),
+                    i + 1,
+                    entry.mount_point.bright_white()
+                );
                 warnings += 1;
             }
         }
@@ -497,14 +535,18 @@ fn validate_fstab() -> Result<()> {
         println!("{} No issues found! /etc/fstab looks good.", "✅".green());
     } else {
         if issues > 0 {
-            println!("{} Found {} critical issue(s)",
-                     "❌".red(),
-                     issues.to_string().red().bold());
+            println!(
+                "{} Found {} critical issue(s)",
+                "❌".red(),
+                issues.to_string().red().bold()
+            );
         }
         if warnings > 0 {
-            println!("{} Found {} warning(s)",
-                     "⚠️ ".yellow(),
-                     warnings.to_string().yellow().bold());
+            println!(
+                "{} Found {} warning(s)",
+                "⚠️ ".yellow(),
+                warnings.to_string().yellow().bold()
+            );
         }
     }
     Ok(())
@@ -517,8 +559,11 @@ fn discover_block_devices() -> Result<Vec<BlockDevice>> {
         "macos" => discover_macos_devices(),
         "linux" => discover_linux_devices(),
         _ => {
-            eprintln!("{} Device discovery not supported on {}",
-                     "Warning:".yellow(), os);
+            eprintln!(
+                "{} Device discovery not supported on {}",
+                "Warning:".yellow(),
+                os
+            );
             Ok(Vec::new())
         }
     }
@@ -592,7 +637,8 @@ fn get_macos_device_info(disk_id: &str) -> Result<BlockDevice> {
                     label = vol_name;
                 }
             }
-        } else if line.starts_with("Type (Bundle):") || line.starts_with("File System Personality:") {
+        } else if line.starts_with("Type (Bundle):") || line.starts_with("File System Personality:")
+        {
             let fs = line.split(':').nth(1).map(|s| s.trim().to_string());
             if let Some(ref f) = fs {
                 if !f.is_empty() && fs_type.is_none() {
@@ -629,7 +675,11 @@ fn get_macos_device_info(disk_id: &str) -> Result<BlockDevice> {
 fn discover_linux_devices() -> Result<Vec<BlockDevice>> {
     // Use lsblk to get block device information
     let output = Command::new("lsblk")
-        .args(&["-J", "-o", "NAME,UUID,PARTUUID,LABEL,FSTYPE,SIZE,MOUNTPOINT,RM,ROTA"])
+        .args(&[
+            "-J",
+            "-o",
+            "NAME,UUID,PARTUUID,LABEL,FSTYPE,SIZE,MOUNTPOINT,RM,ROTA",
+        ])
         .output()
         .context("Failed to run lsblk. Make sure lsblk is installed.")?;
 
@@ -638,8 +688,8 @@ fn discover_linux_devices() -> Result<Vec<BlockDevice>> {
     }
 
     let json_str = String::from_utf8_lossy(&output.stdout);
-    let parsed: serde_json::Value = serde_json::from_str(&json_str)
-        .context("Failed to parse lsblk JSON output")?;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).context("Failed to parse lsblk JSON output")?;
 
     let mut devices = Vec::new();
 
@@ -690,10 +740,13 @@ fn discover_devices(config: &CliConfig) -> Result<()> {
 
     if devices.is_empty() {
         if config.json_output {
-            println!("{}", serde_json::json!({
-                "devices": [],
-                "count": 0
-            }));
+            println!(
+                "{}",
+                serde_json::json!({
+                    "devices": [],
+                    "count": 0
+                })
+            );
         } else {
             println!("No block devices found");
         }
@@ -702,35 +755,43 @@ fn discover_devices(config: &CliConfig) -> Result<()> {
 
     if config.json_output {
         // JSON output for automation
-        let json_devices: Vec<serde_json::Value> = devices.iter().map(|d| {
-            serde_json::json!({
-                "device": d.device,
-                "uuid": d.uuid,
-                "partuuid": d.partuuid,
-                "label": d.label,
-                "filesystem": d.fs_type,
-                "size": d.size,
-                "mount_point": d.mount_point,
-                "is_ssd": d.is_ssd,
-                "is_removable": d.is_removable
+        let json_devices: Vec<serde_json::Value> = devices
+            .iter()
+            .map(|d| {
+                serde_json::json!({
+                    "device": d.device,
+                    "uuid": d.uuid,
+                    "partuuid": d.partuuid,
+                    "label": d.label,
+                    "filesystem": d.fs_type,
+                    "size": d.size,
+                    "mount_point": d.mount_point,
+                    "is_ssd": d.is_ssd,
+                    "is_removable": d.is_removable
+                })
             })
-        }).collect();
+            .collect();
 
-        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
-            "devices": json_devices,
-            "count": devices.len()
-        }))?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "devices": json_devices,
+                "count": devices.len()
+            }))?
+        );
     } else {
         // Human-readable output
         println!("Discovering block devices...\n");
 
-        println!("{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
-                 "DEVICE".cyan().bold(),
-                 "UUID".cyan().bold(),
-                 "LABEL".cyan().bold(),
-                 "TYPE".cyan().bold(),
-                 "SIZE".cyan().bold(),
-                 "MOUNT POINT".cyan().bold());
+        println!(
+            "{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
+            "DEVICE".cyan().bold(),
+            "UUID".cyan().bold(),
+            "LABEL".cyan().bold(),
+            "TYPE".cyan().bold(),
+            "SIZE".cyan().bold(),
+            "MOUNT POINT".cyan().bold()
+        );
         println!("{}", "=".repeat(140).bright_black());
 
         for device in &devices {
@@ -756,13 +817,15 @@ fn discover_devices(config: &CliConfig) -> Result<()> {
                 tags.push("REMOVABLE".magenta());
             }
 
-            print!("{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
-                   device_color.to_string(),
-                   uuid_display.truecolor(150, 150, 150).to_string(),
-                   label_display.bright_white().to_string(),
-                   fs_display.yellow().to_string(),
-                   size_display,
-                   mount_display.green().to_string());
+            print!(
+                "{:<20} {:<38} {:<20} {:<10} {:<10} {:<20}",
+                device_color.to_string(),
+                uuid_display.truecolor(150, 150, 150).to_string(),
+                label_display.bright_white().to_string(),
+                fs_display.yellow().to_string(),
+                size_display,
+                mount_display.green().to_string()
+            );
 
             if !tags.is_empty() {
                 print!(" [");
@@ -796,7 +859,8 @@ fn suggest_mount_options(device: &BlockDevice) -> MountSuggestion {
             "ext4" => {
                 options.push("noatime".to_string());
                 options.push("discard".to_string());
-                rationale.push("noatime: Reduces SSD wear by not updating access times".to_string());
+                rationale
+                    .push("noatime: Reduces SSD wear by not updating access times".to_string());
                 rationale.push("discard: Enables TRIM support for SSDs".to_string());
             }
             "btrfs" => {
@@ -886,15 +950,19 @@ fn suggest_mounts(device_filter: Option<&str>) -> Result<()> {
     let devices = discover_block_devices()?;
 
     // Filter out already mounted devices and apply user filter
-    let unmounted: Vec<_> = devices.into_iter()
+    let unmounted: Vec<_> = devices
+        .into_iter()
         .filter(|d| {
-            let not_system_mounted = d.mount_point.is_none() ||
-                matches!(d.mount_point.as_deref(), Some("/") | Some("/boot") | Some("/home"));
+            let not_system_mounted = d.mount_point.is_none()
+                || matches!(
+                    d.mount_point.as_deref(),
+                    Some("/") | Some("/boot") | Some("/home")
+                );
 
             let matches_filter = if let Some(filter) = device_filter {
-                d.device.contains(filter) ||
-                d.label.as_ref().map_or(false, |l| l.contains(filter)) ||
-                d.uuid.as_ref().map_or(false, |u| u.contains(filter))
+                d.device.contains(filter)
+                    || d.label.as_ref().map_or(false, |l| l.contains(filter))
+                    || d.uuid.as_ref().map_or(false, |u| u.contains(filter))
             } else {
                 true
             };
@@ -904,7 +972,10 @@ fn suggest_mounts(device_filter: Option<&str>) -> Result<()> {
         .collect();
 
     if unmounted.is_empty() {
-        println!("{}", "No devices available for mounting suggestions".yellow());
+        println!(
+            "{}",
+            "No devices available for mounting suggestions".yellow()
+        );
         return Ok(());
     }
 
@@ -912,27 +983,44 @@ fn suggest_mounts(device_filter: Option<&str>) -> Result<()> {
         let suggestion = suggest_mount_options(&device);
 
         println!("{}", "─".repeat(100).bright_black());
-        println!("{} {}", "Device:".cyan().bold(), device.device.bright_white());
+        println!(
+            "{} {}",
+            "Device:".cyan().bold(),
+            device.device.bright_white()
+        );
 
         if let Some(uuid) = &device.uuid {
-            println!("  {} {}", "UUID:".truecolor(150, 150, 150), uuid.truecolor(150, 150, 150));
+            println!(
+                "  {} {}",
+                "UUID:".truecolor(150, 150, 150),
+                uuid.truecolor(150, 150, 150)
+            );
         }
         if let Some(label) = &device.label {
             println!("  {} {}", "Label:".cyan(), label.bright_white());
         }
-        println!("  {} {}", "Type:".cyan(), suggestion.suggested_fs_type.yellow());
+        println!(
+            "  {} {}",
+            "Type:".cyan(),
+            suggestion.suggested_fs_type.yellow()
+        );
         if let Some(size) = &device.size {
             println!("  {} {}", "Size:".cyan(), size);
         }
 
         println!("\n{}", "Suggested fstab entry:".green().bold());
-        println!("  {} {} {} {} {} {}",
-                 suggestion.suggested_device_id.bright_yellow(),
-                 suggestion.suggested_mount_point.bright_green(),
-                 suggestion.suggested_fs_type.yellow(),
-                 suggestion.suggested_options.join(",").truecolor(180, 180, 180),
-                 "0".truecolor(150, 150, 150),
-                 "2".truecolor(150, 150, 150));
+        println!(
+            "  {} {} {} {} {} {}",
+            suggestion.suggested_device_id.bright_yellow(),
+            suggestion.suggested_mount_point.bright_green(),
+            suggestion.suggested_fs_type.yellow(),
+            suggestion
+                .suggested_options
+                .join(",")
+                .truecolor(180, 180, 180),
+            "0".truecolor(150, 150, 150),
+            "2".truecolor(150, 150, 150)
+        );
 
         if !suggestion.rationale.is_empty() {
             println!("\n{}", "Rationale:".blue().bold());
@@ -945,9 +1033,15 @@ fn suggest_mounts(device_filter: Option<&str>) -> Result<()> {
     }
 
     println!("{}", "=".repeat(100).bright_black());
-    println!("{} Remember to create the mount point directory before mounting:", "Note:".yellow().bold());
+    println!(
+        "{} Remember to create the mount point directory before mounting:",
+        "Note:".yellow().bold()
+    );
     println!("  {}", "sudo mkdir -p <mount_point>".bright_white());
-    println!("  {}", "sudo mount -a  # Test the configuration".bright_white());
+    println!(
+        "  {}",
+        "sudo mount -a  # Test the configuration".bright_white()
+    );
 
     Ok(())
 }
@@ -1037,8 +1131,8 @@ fn get_corpus_path() -> PathBuf {
 fn corpus_ingest(file_path: &str) -> Result<()> {
     println!("{} Adding fstab configuration to library...", "📚".bold());
 
-    let content = fs::read_to_string(file_path)
-        .with_context(|| format!("Failed to read {}", file_path))?;
+    let content =
+        fs::read_to_string(file_path).with_context(|| format!("Failed to read {}", file_path))?;
 
     // Parse the fstab
     let entries = parse_fstab_from_path(file_path)?;
@@ -1074,23 +1168,36 @@ fn corpus_ingest(file_path: &str) -> Result<()> {
 
     fs::write(&storage_file, serde_json::to_string_pretty(&metadata)?)?;
 
-    println!("{} Successfully added to configuration library", "✓".green().bold());
+    println!(
+        "{} Successfully added to configuration library",
+        "✓".green().bold()
+    );
     println!("  {} {}", "Config ID:".cyan(), config_id.bright_white());
     println!("  {} {}", "Source:".cyan(), file_path);
     println!("  {} {}", "Entries:".cyan(), entries.len());
-    println!("\n{}", "This configuration can now be searched and referenced.".truecolor(150, 150, 150));
+    println!(
+        "\n{}",
+        "This configuration can now be searched and referenced.".truecolor(150, 150, 150)
+    );
 
     Ok(())
 }
 
 fn corpus_search(query: &str) -> Result<()> {
-    println!("{} Searching configuration library for: {}\n", "🔍".bold(), query.bright_white());
+    println!(
+        "{} Searching configuration library for: {}\n",
+        "🔍".bold(),
+        query.bright_white()
+    );
 
     let corpus_path = get_corpus_path();
 
     if !corpus_path.exists() {
         println!("{}", "No configurations in library yet.".yellow());
-        println!("  Use {} to add fstab files", "catdog corpus ingest <file>".bright_white());
+        println!(
+            "  Use {} to add fstab files",
+            "catdog corpus ingest <file>".bright_white()
+        );
         return Ok(());
     }
 
@@ -1118,13 +1225,17 @@ fn corpus_search(query: &str) -> Result<()> {
                 let options = entry["options"].as_str().unwrap_or("");
 
                 // Check if query matches any field
-                if device.to_lowercase().contains(&query_lower) ||
-                   mount_point.to_lowercase().contains(&query_lower) ||
-                   fs_type.to_lowercase().contains(&query_lower) ||
-                   options.to_lowercase().contains(&query_lower) {
+                if device.to_lowercase().contains(&query_lower)
+                    || mount_point.to_lowercase().contains(&query_lower)
+                    || fs_type.to_lowercase().contains(&query_lower)
+                    || options.to_lowercase().contains(&query_lower)
+                {
                     matches.push((
                         config["id"].as_str().unwrap_or("unknown").to_string(),
-                        config["source_file"].as_str().unwrap_or("unknown").to_string(),
+                        config["source_file"]
+                            .as_str()
+                            .unwrap_or("unknown")
+                            .to_string(),
                         entry.clone(),
                     ));
                 }
@@ -1137,18 +1248,40 @@ fn corpus_search(query: &str) -> Result<()> {
         return Ok(());
     }
 
-    println!("{} Found {} matching configuration(s):\n", "✓".green().bold(), matches.len());
+    println!(
+        "{} Found {} matching configuration(s):\n",
+        "✓".green().bold(),
+        matches.len()
+    );
 
     for (config_id, source, entry) in matches {
         println!("{}", "─".repeat(80).bright_black());
-        println!("{} {} {}",
-                 "From:".cyan().bold(),
-                 source.bright_white(),
-                 format!("({})", &config_id[..8]).truecolor(150, 150, 150));
-        println!("  {} {}", "Device:".cyan(), entry["device"].as_str().unwrap_or(""));
-        println!("  {} {}", "Mount:".cyan(), entry["mount_point"].as_str().unwrap_or(""));
-        println!("  {} {}", "Type:".cyan(), entry["fs_type"].as_str().unwrap_or(""));
-        println!("  {} {}", "Options:".cyan(), entry["options"].as_str().unwrap_or(""));
+        println!(
+            "{} {} {}",
+            "From:".cyan().bold(),
+            source.bright_white(),
+            format!("({})", &config_id[..8]).truecolor(150, 150, 150)
+        );
+        println!(
+            "  {} {}",
+            "Device:".cyan(),
+            entry["device"].as_str().unwrap_or("")
+        );
+        println!(
+            "  {} {}",
+            "Mount:".cyan(),
+            entry["mount_point"].as_str().unwrap_or("")
+        );
+        println!(
+            "  {} {}",
+            "Type:".cyan(),
+            entry["fs_type"].as_str().unwrap_or("")
+        );
+        println!(
+            "  {} {}",
+            "Options:".cyan(),
+            entry["options"].as_str().unwrap_or("")
+        );
         println!();
     }
 
@@ -1162,14 +1295,18 @@ fn corpus_stats() -> Result<()> {
 
     if !corpus_path.exists() {
         println!("{}", "No configurations in library yet.".yellow());
-        println!("  Use {} to add fstab files", "catdog corpus ingest <file>".bright_white());
+        println!(
+            "  Use {} to add fstab files",
+            "catdog corpus ingest <file>".bright_white()
+        );
         return Ok(());
     }
 
     let mut total_configs = 0;
     let mut total_entries = 0;
     let mut fs_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    let mut mount_options: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let mut mount_options: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
 
     // Read all stored configurations
     for entry in fs::read_dir(&corpus_path)? {
@@ -1205,15 +1342,28 @@ fn corpus_stats() -> Result<()> {
     }
 
     println!("{}", "Library Overview:".cyan().bold());
-    println!("  {} {}", "Configurations:".truecolor(150, 150, 150), total_configs.to_string().bright_white());
-    println!("  {} {}", "Total Entries:".truecolor(150, 150, 150), total_entries.to_string().bright_white());
+    println!(
+        "  {} {}",
+        "Configurations:".truecolor(150, 150, 150),
+        total_configs.to_string().bright_white()
+    );
+    println!(
+        "  {} {}",
+        "Total Entries:".truecolor(150, 150, 150),
+        total_entries.to_string().bright_white()
+    );
 
     if !fs_types.is_empty() {
         println!("\n{}", "Filesystem Types:".cyan().bold());
         let mut fs_vec: Vec<_> = fs_types.iter().collect();
         fs_vec.sort_by(|a, b| b.1.cmp(a.1));
         for (fs, count) in fs_vec.iter().take(10) {
-            println!("  {} {} ({})", "•".blue(), fs.bright_white(), count.to_string().truecolor(150, 150, 150));
+            println!(
+                "  {} {} ({})",
+                "•".blue(),
+                fs.bright_white(),
+                count.to_string().truecolor(150, 150, 150)
+            );
         }
     }
 
@@ -1222,11 +1372,20 @@ fn corpus_stats() -> Result<()> {
         let mut opts_vec: Vec<_> = mount_options.iter().collect();
         opts_vec.sort_by(|a, b| b.1.cmp(a.1));
         for (opt, count) in opts_vec.iter().take(10) {
-            println!("  {} {} ({})", "•".blue(), opt.bright_white(), count.to_string().truecolor(150, 150, 150));
+            println!(
+                "  {} {} ({})",
+                "•".blue(),
+                opt.bright_white(),
+                count.to_string().truecolor(150, 150, 150)
+            );
         }
     }
 
-    println!("\n{}", "Use 'catdog corpus search <query>' to find specific configurations".truecolor(150, 150, 150));
+    println!(
+        "\n{}",
+        "Use 'catdog corpus search <query>' to find specific configurations"
+            .truecolor(150, 150, 150)
+    );
 
     Ok(())
 }
@@ -1247,8 +1406,13 @@ fn generate_fstab(output_file: Option<&str>) -> Result<()> {
     // Add header
     fstab_content.push_str("# /etc/fstab: static file system information\n");
     fstab_content.push_str("#\n");
-    fstab_content.push_str("# Generated by catdog - A filesystem utility that takes itself way too seriously\n");
-    fstab_content.push_str(&format!("# Generated at: {}\n", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+    fstab_content.push_str(
+        "# Generated by catdog - A filesystem utility that takes itself way too seriously\n",
+    );
+    fstab_content.push_str(&format!(
+        "# Generated at: {}\n",
+        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+    ));
     fstab_content.push_str("#\n");
     fstab_content.push_str("# <device>                                <mount point>    <type>  <options>              <dump> <pass>\n");
     fstab_content.push_str("#\n\n");
@@ -1294,7 +1458,11 @@ fn generate_fstab(output_file: Option<&str>) -> Result<()> {
             suggestion.suggested_fs_type,
             suggestion.suggested_options.join(","),
             "0",
-            if suggestion.suggested_mount_point == "/" { "1" } else { "2" }
+            if suggestion.suggested_mount_point == "/" {
+                "1"
+            } else {
+                "2"
+            }
         ));
         fstab_content.push('\n');
 
@@ -1322,18 +1490,27 @@ fn generate_fstab(output_file: Option<&str>) -> Result<()> {
         Some(file_path) => {
             fs::write(file_path, &fstab_content)
                 .with_context(|| format!("Failed to write to {}", file_path))?;
-            println!("{} Generated fstab written to: {}",
-                     "✓".green().bold(),
-                     file_path.bright_white());
+            println!(
+                "{} Generated fstab written to: {}",
+                "✓".green().bold(),
+                file_path.bright_white()
+            );
             println!("\n{}", "Next steps:".cyan().bold());
-            println!("  1. Review the file: {}", format!("cat {}", file_path).bright_white());
+            println!(
+                "  1. Review the file: {}",
+                format!("cat {}", file_path).bright_white()
+            );
             println!("  2. Create mount directories for each entry");
-            println!("  3. Back up your current fstab: {}",
-                     "sudo cp /etc/fstab /etc/fstab.backup".bright_white());
+            println!(
+                "  3. Back up your current fstab: {}",
+                "sudo cp /etc/fstab /etc/fstab.backup".bright_white()
+            );
             println!("  4. Merge with your existing fstab if needed");
-            println!("\n{} Generated {} fstab entries",
-                     "📝".bold(),
-                     entry_count.to_string().green().bold());
+            println!(
+                "\n{} Generated {} fstab entries",
+                "📝".bold(),
+                entry_count.to_string().green().bold()
+            );
         }
         None => {
             // Print to stdout
@@ -1342,11 +1519,12 @@ fn generate_fstab(output_file: Option<&str>) -> Result<()> {
             print!("{}", fstab_content);
             println!("{}", "=".repeat(100).bright_black());
             println!("\n{}", "To save to a file, use:".cyan().bold());
-            println!("  {}",
-                     "catdog generate fstab.new".bright_white());
-            println!("\n{} Generated {} fstab entries",
-                     "📝".bold(),
-                     entry_count.to_string().green().bold());
+            println!("  {}", "catdog generate fstab.new".bright_white());
+            println!(
+                "\n{} Generated {} fstab entries",
+                "📝".bold(),
+                entry_count.to_string().green().bold()
+            );
         }
     }
 
@@ -1371,62 +1549,190 @@ fn backup_file(file_path: &str) -> Result<PathBuf> {
 }
 
 fn print_help() {
-    println!("{} {} A professional filesystem management tool",
+    println!(
+        "{} {} A professional filesystem management tool",
         "catdog".bright_green().bold(),
-        VERSION.bright_black());
+        VERSION.bright_black()
+    );
     println!("\n{}", "USAGE:".cyan().bold());
     println!("    catdog [FLAGS] <COMMAND> [ARGS]\n");
 
     println!("{}", "FLAGS:".cyan().bold());
-    println!("    {}         Output in JSON format (for automation)", "--json".bright_yellow());
-    println!("    {}      Disable colored output", "--no-color".bright_yellow());
-    println!("    {}       Show preview without making changes", "--dry-run".bright_yellow());
-    println!("    {}    Enable verbose logging", "-v, --verbose".bright_yellow());
-    println!("    {}  Show version information", "-V, --version".bright_yellow());
+    println!(
+        "    {}         Output in JSON format (for automation)",
+        "--json".bright_yellow()
+    );
+    println!(
+        "    {}      Disable colored output",
+        "--no-color".bright_yellow()
+    );
+    println!(
+        "    {}       Show preview without making changes",
+        "--dry-run".bright_yellow()
+    );
+    println!(
+        "    {}    Enable verbose logging",
+        "-v, --verbose".bright_yellow()
+    );
+    println!(
+        "    {}  Show version information",
+        "-V, --version".bright_yellow()
+    );
     println!();
 
-    println!("{} {}", "FILESYSTEM".cyan().bold(), "COMMANDS:".cyan().bold());
-    println!("    {}          Display raw /etc/fstab file", "cat".bright_yellow());
-    println!("    {}          Parse and display /etc/fstab in table format", "dog".bright_yellow());
-    println!("    {}     List all mount points", "list, ls".bright_yellow());
-    println!("    {}  Find entries matching device or mount point", "find <term>".bright_yellow());
-    println!("    {}     Check /etc/fstab for common issues", "validate".bright_yellow());
-    println!("    {}    Discover available block devices (supports --json)", "discover".bright_yellow());
-    println!("    {}       Generate smart mount suggestions for devices", "suggest [device]".bright_yellow());
-    println!("    {}       Generate complete fstab from discovered devices", "generate [file]".bright_yellow());
-    println!("    {}      Create timestamped backup of fstab", "backup [file]".bright_yellow());
+    println!(
+        "{} {}",
+        "FILESYSTEM".cyan().bold(),
+        "COMMANDS:".cyan().bold()
+    );
+    println!(
+        "    {}          Display raw /etc/fstab file",
+        "cat".bright_yellow()
+    );
+    println!(
+        "    {}          Parse and display /etc/fstab in table format",
+        "dog".bright_yellow()
+    );
+    println!(
+        "    {}     List all mount points",
+        "list, ls".bright_yellow()
+    );
+    println!(
+        "    {}  Find entries matching device or mount point",
+        "find <term>".bright_yellow()
+    );
+    println!(
+        "    {}     Check /etc/fstab for common issues",
+        "validate".bright_yellow()
+    );
+    println!(
+        "    {}    Discover available block devices (supports --json)",
+        "discover".bright_yellow()
+    );
+    println!(
+        "    {}       Generate smart mount suggestions for devices",
+        "suggest [device]".bright_yellow()
+    );
+    println!(
+        "    {}       Generate complete fstab from discovered devices",
+        "generate [file]".bright_yellow()
+    );
+    println!(
+        "    {}      Create timestamped backup of fstab",
+        "backup [file]".bright_yellow()
+    );
 
-    println!("\n{} {} {}", "BARK".cyan().bold(), "(ALERTING)".bright_black(), "COMMANDS:".cyan().bold());
-    println!("    {}       Run filesystem health checks once", "check".bright_yellow());
-    println!("    {}       Start continuous monitoring (default: 300s interval)", "monitor [interval]".bright_yellow());
-    println!("    {}        List all barks (optionally filter: firing/acknowledged/resolved/silenced)", "barks [status]".bright_yellow());
-    println!("    {}         Show detailed information about a bark", "bark <id>".bright_yellow());
-    println!("    {}           Acknowledge a bark (alias: pet)", "ack <id>".bright_yellow());
-    println!("    {}      Resolve a bark (alias: quiet)", "resolve <id>".bright_yellow());
-    println!("    {}     Silence a bark (alias: hush)", "silence <id>".bright_yellow());
+    println!(
+        "\n{} {} {}",
+        "BARK".cyan().bold(),
+        "(ALERTING)".bright_black(),
+        "COMMANDS:".cyan().bold()
+    );
+    println!(
+        "    {}       Run filesystem health checks once",
+        "check".bright_yellow()
+    );
+    println!(
+        "    {}       Start continuous monitoring (default: 300s interval)",
+        "monitor [interval]".bright_yellow()
+    );
+    println!(
+        "    {}        List all barks (optionally filter: firing/acknowledged/resolved/silenced)",
+        "barks [status]".bright_yellow()
+    );
+    println!(
+        "    {}         Show detailed information about a bark",
+        "bark <id>".bright_yellow()
+    );
+    println!(
+        "    {}           Acknowledge a bark (alias: pet)",
+        "ack <id>".bright_yellow()
+    );
+    println!(
+        "    {}      Resolve a bark (alias: quiet)",
+        "resolve <id>".bright_yellow()
+    );
+    println!(
+        "    {}     Silence a bark (alias: hush)",
+        "silence <id>".bright_yellow()
+    );
 
     println!("\n{} {}", "CORPUS".cyan().bold(), "COMMANDS:".cyan().bold());
-    println!("    {}       Ingest a file into the corpus", "corpus ingest <file>".bright_yellow());
-    println!("    {}       Search the corpus", "corpus search <query>".bright_yellow());
-    println!("    {}       Show corpus statistics", "corpus stats".bright_yellow());
+    println!(
+        "    {}       Ingest a file into the corpus",
+        "corpus ingest <file>".bright_yellow()
+    );
+    println!(
+        "    {}       Search the corpus",
+        "corpus search <query>".bright_yellow()
+    );
+    println!(
+        "    {}       Show corpus statistics",
+        "corpus stats".bright_yellow()
+    );
 
-    println!("\n    {}         Show this help message", "help".bright_yellow());
+    println!(
+        "\n    {}         Show this help message",
+        "help".bright_yellow()
+    );
 
     println!("\n{}", "EXAMPLES:".cyan().bold());
-    println!("    catdog cat                 {} Show raw fstab file", "#".bright_black());
-    println!("    catdog dog                 {} Parse and display fstab nicely", "#".bright_black());
-    println!("    catdog find /dev           {} Find all entries with /dev", "#".bright_black());
-    println!("    catdog validate            {} Check for common issues", "#".bright_black());
-    println!("    catdog discover            {} List all block devices with details", "#".bright_black());
-    println!("    catdog suggest             {} Generate fstab entries with smart defaults", "#".bright_black());
-    println!("    catdog generate fstab.new  {} Generate complete fstab file", "#".bright_black());
-    println!("    catdog check               {} Run health checks once", "#".bright_black());
-    println!("    catdog monitor 60          {} Start monitoring with 60s interval", "#".bright_black());
-    println!("    catdog barks               {} List all barks (alerts)", "#".bright_black());
-    println!("    catdog barks firing        {} List only firing barks", "#".bright_black());
-    println!("    catdog bark <id>           {} Show bark details", "#".bright_black());
-    println!("    catdog pet <id>            {} Pet the dog (acknowledge bark)", "#".bright_black());
-    println!("    catdog quiet <id>          {} Quiet the dog (resolve bark)", "#".bright_black());
+    println!(
+        "    catdog cat                 {} Show raw fstab file",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog dog                 {} Parse and display fstab nicely",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog find /dev           {} Find all entries with /dev",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog validate            {} Check for common issues",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog discover            {} List all block devices with details",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog suggest             {} Generate fstab entries with smart defaults",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog generate fstab.new  {} Generate complete fstab file",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog check               {} Run health checks once",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog monitor 60          {} Start monitoring with 60s interval",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog barks               {} List all barks (alerts)",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog barks firing        {} List only firing barks",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog bark <id>           {} Show bark details",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog pet <id>            {} Pet the dog (acknowledge bark)",
+        "#".bright_black()
+    );
+    println!(
+        "    catdog quiet <id>          {} Quiet the dog (resolve bark)",
+        "#".bright_black()
+    );
 }
 
 #[cfg(test)]

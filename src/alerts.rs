@@ -56,7 +56,12 @@ pub struct Alert {
 }
 
 impl Alert {
-    pub fn new(title: String, description: String, severity: AlertSeverity, source: String) -> Self {
+    pub fn new(
+        title: String,
+        description: String,
+        severity: AlertSeverity,
+        source: String,
+    ) -> Self {
         let now = Utc::now();
         Alert {
             id: Uuid::new_v4().to_string(),
@@ -119,9 +124,17 @@ impl Default for AlertConfig {
 #[serde(tag = "type")]
 pub enum NotificationChannel {
     Console,
-    Webhook { url: String },
-    Slack { webhook_url: String },
-    Email { smtp_server: String, from: String, to: Vec<String> },
+    Webhook {
+        url: String,
+    },
+    Slack {
+        webhook_url: String,
+    },
+    Email {
+        smtp_server: String,
+        from: String,
+        to: Vec<String>,
+    },
 }
 
 pub struct AlertManager {
@@ -157,15 +170,14 @@ impl AlertManager {
             return Ok(Vec::new());
         }
 
-        let contents = fs::read_to_string(path)
-            .context("Failed to read alerts storage")?;
+        let contents = fs::read_to_string(path).context("Failed to read alerts storage")?;
 
         if contents.is_empty() {
             return Ok(Vec::new());
         }
 
-        let alerts: Vec<Alert> = serde_json::from_str(&contents)
-            .context("Failed to parse alerts JSON")?;
+        let alerts: Vec<Alert> =
+            serde_json::from_str(&contents).context("Failed to parse alerts JSON")?;
 
         Ok(alerts)
     }
@@ -173,15 +185,13 @@ impl AlertManager {
     fn save_alerts(&self) -> Result<()> {
         // Ensure parent directory exists
         if let Some(parent) = self.storage_path.parent() {
-            fs::create_dir_all(parent)
-                .context("Failed to create storage directory")?;
+            fs::create_dir_all(parent).context("Failed to create storage directory")?;
         }
 
-        let json = serde_json::to_string_pretty(&self.alerts)
-            .context("Failed to serialize alerts")?;
+        let json =
+            serde_json::to_string_pretty(&self.alerts).context("Failed to serialize alerts")?;
 
-        fs::write(&self.storage_path, json)
-            .context("Failed to write alerts to storage")?;
+        fs::write(&self.storage_path, json).context("Failed to write alerts to storage")?;
 
         Ok(())
     }
@@ -189,8 +199,8 @@ impl AlertManager {
     pub fn create_alert(&mut self, alert: Alert) -> Result<String> {
         // Check for duplicate active alerts with same title
         let has_duplicate = self.alerts.iter().any(|a| {
-            a.title == alert.title &&
-            matches!(a.status, AlertStatus::Firing | AlertStatus::Acknowledged)
+            a.title == alert.title
+                && matches!(a.status, AlertStatus::Firing | AlertStatus::Acknowledged)
         });
 
         if has_duplicate {
@@ -209,7 +219,9 @@ impl AlertManager {
     }
 
     pub fn acknowledge_alert(&mut self, alert_id: &str) -> Result<()> {
-        let alert = self.alerts.iter_mut()
+        let alert = self
+            .alerts
+            .iter_mut()
             .find(|a| a.id == alert_id)
             .context("Alert not found")?;
 
@@ -220,7 +232,9 @@ impl AlertManager {
     }
 
     pub fn resolve_alert(&mut self, alert_id: &str) -> Result<()> {
-        let alert = self.alerts.iter_mut()
+        let alert = self
+            .alerts
+            .iter_mut()
             .find(|a| a.id == alert_id)
             .context("Alert not found")?;
 
@@ -231,7 +245,9 @@ impl AlertManager {
     }
 
     pub fn silence_alert(&mut self, alert_id: &str) -> Result<()> {
-        let alert = self.alerts.iter_mut()
+        let alert = self
+            .alerts
+            .iter_mut()
             .find(|a| a.id == alert_id)
             .context("Alert not found")?;
 
@@ -243,9 +259,7 @@ impl AlertManager {
 
     pub fn get_alerts(&self, filter: Option<AlertStatus>) -> Vec<&Alert> {
         match filter {
-            Some(status) => self.alerts.iter()
-                .filter(|a| a.status == status)
-                .collect(),
+            Some(status) => self.alerts.iter().filter(|a| a.status == status).collect(),
             None => self.alerts.iter().collect(),
         }
     }
@@ -257,8 +271,12 @@ impl AlertManager {
     fn notify(&self, alert: &Alert) -> Result<()> {
         for channel in &self.config.notification_channels {
             if let Err(e) = self.send_notification(channel, alert) {
-                eprintln!("{} Failed to send notification via {:?}: {}",
-                    "Warning:".yellow(), channel, e);
+                eprintln!(
+                    "{} Failed to send notification via {:?}: {}",
+                    "Warning:".yellow(),
+                    channel,
+                    e
+                );
             }
         }
         Ok(())
@@ -270,17 +288,22 @@ impl AlertManager {
                 self.print_alert_notification(alert);
                 Ok(())
             }
-            NotificationChannel::Webhook { url } => {
-                self.send_webhook_notification(url, alert)
-            }
+            NotificationChannel::Webhook { url } => self.send_webhook_notification(url, alert),
             NotificationChannel::Slack { webhook_url } => {
                 self.send_slack_notification(webhook_url, alert)
             }
-            NotificationChannel::Email { smtp_server, from, to } => {
+            NotificationChannel::Email {
+                smtp_server,
+                from,
+                to,
+            } => {
                 // Email sending would require additional dependencies
                 // For now, just log it
-                println!("{} Email notification would be sent to: {:?}",
-                    "Info:".blue(), to);
+                println!(
+                    "{} Email notification would be sent to: {:?}",
+                    "Info:".blue(),
+                    to
+                );
                 println!("  From: {}", from);
                 println!("  SMTP: {}", smtp_server);
                 Ok(())
@@ -290,25 +313,46 @@ impl AlertManager {
 
     fn print_alert_notification(&self, alert: &Alert) {
         println!("\n{}", "=".repeat(80).bright_black());
-        println!("{} {} {}",
+        println!(
+            "{} {} {}",
             alert.severity.emoji(),
             "NEW ALERT".bold(),
-            alert.severity.emoji());
+            alert.severity.emoji()
+        );
         println!("{}", "=".repeat(80).bright_black());
-        println!("{} {}", "Severity:".cyan().bold(),
-            format!("{:?}", alert.severity).color(alert.severity.color()).bold());
+        println!(
+            "{} {}",
+            "Severity:".cyan().bold(),
+            format!("{:?}", alert.severity)
+                .color(alert.severity.color())
+                .bold()
+        );
         println!("{} {}", "Title:".cyan().bold(), alert.title.bright_white());
         println!("{} {}", "Description:".cyan().bold(), alert.description);
-        println!("{} {}", "Source:".cyan().bold(), alert.source.bright_yellow());
-        println!("{} {}", "Alert ID:".cyan().bold(), alert.id.truecolor(150, 150, 150));
-        println!("{} {}", "Created:".cyan().bold(), alert.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
+        println!(
+            "{} {}",
+            "Source:".cyan().bold(),
+            alert.source.bright_yellow()
+        );
+        println!(
+            "{} {}",
+            "Alert ID:".cyan().bold(),
+            alert.id.truecolor(150, 150, 150)
+        );
+        println!(
+            "{} {}",
+            "Created:".cyan().bold(),
+            alert.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+        );
 
         if !alert.metadata.is_empty() {
             println!("\n{}", "Metadata:".cyan().bold());
             for (key, value) in &alert.metadata {
-                println!("  {} {}",
+                println!(
+                    "  {} {}",
                     format!("{}:", key).truecolor(180, 180, 180),
-                    value.bright_white());
+                    value.bright_white()
+                );
             }
         }
         println!("{}", "=".repeat(80).bright_black());
@@ -327,7 +371,8 @@ impl AlertManager {
         });
 
         let client = reqwest::blocking::Client::new();
-        let response = client.post(url)
+        let response = client
+            .post(url)
             .json(&payload)
             .send()
             .context("Failed to send webhook")?;
@@ -374,7 +419,8 @@ impl AlertManager {
         });
 
         let client = reqwest::blocking::Client::new();
-        let response = client.post(webhook_url)
+        let response = client
+            .post(webhook_url)
             .json(&payload)
             .send()
             .context("Failed to send Slack notification")?;
@@ -393,12 +439,14 @@ pub fn display_alerts(alerts: &[&Alert]) {
         return;
     }
 
-    println!("{:<38} {:<10} {:<30} {:<15} {:<20}",
-             "ID".cyan().bold(),
-             "SEVERITY".cyan().bold(),
-             "TITLE".cyan().bold(),
-             "STATUS".cyan().bold(),
-             "CREATED".cyan().bold());
+    println!(
+        "{:<38} {:<10} {:<30} {:<15} {:<20}",
+        "ID".cyan().bold(),
+        "SEVERITY".cyan().bold(),
+        "TITLE".cyan().bold(),
+        "STATUS".cyan().bold(),
+        "CREATED".cyan().bold()
+    );
     println!("{}", "=".repeat(120).bright_black());
 
     for alert in alerts {
@@ -414,32 +462,47 @@ pub fn display_alerts(alerts: &[&Alert]) {
             AlertStatus::Resolved => status_str.green(),
         };
 
-        println!("{:<38} {:<10} {:<30} {:<15} {}",
-                 alert.id.truecolor(150, 150, 150).to_string(),
-                 severity_colored.to_string(),
-                 alert.title.bright_white().to_string(),
-                 status_colored.to_string(),
-                 alert.created_at.format("%Y-%m-%d %H:%M:%S"));
+        println!(
+            "{:<38} {:<10} {:<30} {:<15} {}",
+            alert.id.truecolor(150, 150, 150).to_string(),
+            severity_colored.to_string(),
+            alert.title.bright_white().to_string(),
+            status_colored.to_string(),
+            alert.created_at.format("%Y-%m-%d %H:%M:%S")
+        );
     }
 
-    println!("\n{} Total alerts: {}",
+    println!(
+        "\n{} Total alerts: {}",
         "ℹ️".blue(),
-        alerts.len().to_string().bright_white().bold());
+        alerts.len().to_string().bright_white().bold()
+    );
 }
 
 pub fn display_alert_detail(alert: &Alert) {
     println!("\n{}", "=".repeat(80).bright_black());
-    println!("{} {} {}",
+    println!(
+        "{} {} {}",
         alert.severity.emoji(),
         "ALERT DETAILS".bold(),
-        alert.severity.emoji());
+        alert.severity.emoji()
+    );
     println!("{}", "=".repeat(80).bright_black());
 
-    println!("{} {}", "Alert ID:".cyan().bold(), alert.id.truecolor(150, 150, 150));
+    println!(
+        "{} {}",
+        "Alert ID:".cyan().bold(),
+        alert.id.truecolor(150, 150, 150)
+    );
     println!("{} {}", "Title:".cyan().bold(), alert.title.bright_white());
     println!("{} {}", "Description:".cyan().bold(), alert.description);
-    println!("{} {}", "Severity:".cyan().bold(),
-        format!("{:?}", alert.severity).color(alert.severity.color()).bold());
+    println!(
+        "{} {}",
+        "Severity:".cyan().bold(),
+        format!("{:?}", alert.severity)
+            .color(alert.severity.color())
+            .bold()
+    );
 
     let status_str = format!("{:?}", alert.status);
     let status_colored = match alert.status {
@@ -450,28 +513,46 @@ pub fn display_alert_detail(alert: &Alert) {
     };
     println!("{} {}", "Status:".cyan().bold(), status_colored.bold());
 
-    println!("{} {}", "Source:".cyan().bold(), alert.source.bright_yellow());
-    println!("{} {}", "Created:".cyan().bold(),
-        alert.created_at.format("%Y-%m-%d %H:%M:%S UTC"));
-    println!("{} {}", "Updated:".cyan().bold(),
-        alert.updated_at.format("%Y-%m-%d %H:%M:%S UTC"));
+    println!(
+        "{} {}",
+        "Source:".cyan().bold(),
+        alert.source.bright_yellow()
+    );
+    println!(
+        "{} {}",
+        "Created:".cyan().bold(),
+        alert.created_at.format("%Y-%m-%d %H:%M:%S UTC")
+    );
+    println!(
+        "{} {}",
+        "Updated:".cyan().bold(),
+        alert.updated_at.format("%Y-%m-%d %H:%M:%S UTC")
+    );
 
     if let Some(ack_time) = alert.acknowledged_at {
-        println!("{} {}", "Acknowledged:".cyan().bold(),
-            ack_time.format("%Y-%m-%d %H:%M:%S UTC"));
+        println!(
+            "{} {}",
+            "Acknowledged:".cyan().bold(),
+            ack_time.format("%Y-%m-%d %H:%M:%S UTC")
+        );
     }
 
     if let Some(resolved_time) = alert.resolved_at {
-        println!("{} {}", "Resolved:".cyan().bold(),
-            resolved_time.format("%Y-%m-%d %H:%M:%S UTC"));
+        println!(
+            "{} {}",
+            "Resolved:".cyan().bold(),
+            resolved_time.format("%Y-%m-%d %H:%M:%S UTC")
+        );
     }
 
     if !alert.metadata.is_empty() {
         println!("\n{}", "Metadata:".cyan().bold());
         for (key, value) in &alert.metadata {
-            println!("  {} {}",
+            println!(
+                "  {} {}",
                 format!("{}:", key).truecolor(180, 180, 180),
-                value.bright_white());
+                value.bright_white()
+            );
         }
     }
 

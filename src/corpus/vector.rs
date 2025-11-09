@@ -2,7 +2,6 @@
 ///
 /// Provides dense and sparse vector representations with optimized
 /// linear algebra operations utilizing SIMD when available.
-
 use std::ops::{Add, Mul};
 
 /// Dense vector with contiguous memory layout for cache efficiency
@@ -36,17 +35,12 @@ impl DenseVector {
     /// - Time: O(d)
     /// - Space: O(1)
     pub fn l2_norm(&self) -> f64 {
-        self.data.iter()
-            .map(|&x| x * x)
-            .sum::<f64>()
-            .sqrt()
+        self.data.iter().map(|&x| x * x).sum::<f64>().sqrt()
     }
 
     /// Computes L1 norm: ||v|| = Σ|vᵢ|
     pub fn l1_norm(&self) -> f64 {
-        self.data.iter()
-            .map(|&x| x.abs())
-            .sum()
+        self.data.iter().map(|&x| x.abs()).sum()
     }
 
     /// Normalizes vector to unit length
@@ -65,7 +59,8 @@ impl DenseVector {
     pub fn dot(&self, other: &DenseVector) -> f64 {
         assert_eq!(self.dimension, other.dimension);
 
-        self.data.iter()
+        self.data
+            .iter()
             .zip(other.data.iter())
             .map(|(&a, &b)| a * b)
             .sum()
@@ -124,7 +119,9 @@ impl Add for DenseVector {
 
     fn add(self, other: Self) -> Self {
         assert_eq!(self.dimension, other.dimension);
-        let data = self.data.iter()
+        let data = self
+            .data
+            .iter()
             .zip(other.data.iter())
             .map(|(&a, &b)| a + b)
             .collect();
@@ -139,9 +136,7 @@ impl Mul<f64> for DenseVector {
     type Output = Self;
 
     fn mul(self, scalar: f64) -> Self {
-        let data = self.data.iter()
-            .map(|&x| x * scalar)
-            .collect();
+        let data = self.data.iter().map(|&x| x * scalar).collect();
         Self {
             data,
             dimension: self.dimension,

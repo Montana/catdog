@@ -30,8 +30,11 @@ impl FsMonitor {
     }
 
     pub fn monitor_loop(&mut self, interval_seconds: u64) -> Result<()> {
-        println!("{} Starting filesystem monitoring (interval: {}s)",
-            "🚀".bold(), interval_seconds);
+        println!(
+            "{} Starting filesystem monitoring (interval: {}s)",
+            "🚀".bold(),
+            interval_seconds
+        );
         println!("Press Ctrl+C to stop\n");
 
         loop {
@@ -220,8 +223,10 @@ impl FsMonitor {
             if !path.exists() {
                 let mut alert = Alert::new(
                     format!("Mount point {} does not exist", mount_point),
-                    format!("The mount point directory {} for device {} does not exist",
-                        mount_point, device),
+                    format!(
+                        "The mount point directory {} for device {} does not exist",
+                        mount_point, device
+                    ),
                     AlertSeverity::Warning,
                     "mount_monitor".to_string(),
                 );

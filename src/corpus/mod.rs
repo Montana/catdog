@@ -3,7 +3,6 @@
 /// This module implements a distributed, persistent corpus management system
 /// utilizing B+ tree indexing with Bloom filter optimization for O(log n)
 /// retrieval complexity and O(1) membership testing.
-
 pub mod analyzer;
 pub mod indexer;
 pub mod vector;
