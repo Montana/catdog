@@ -23,11 +23,6 @@ script:
 after_success:
   - cargo build --release
 
-notifications:
-  email:
-    on_success: never
-    on_failure: change
-
 os:
   - linux
 
